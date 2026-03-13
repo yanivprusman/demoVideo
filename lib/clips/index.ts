@@ -37,7 +37,7 @@ export const clips: ClipDefinition[] = [
       "Two create-app tabs may still be open",
     ],
     enabled: true,
-    outputPath: "/opt/automateLinux/data/screen_recording.mp4",
+    outputPath: "/opt/automateLinux/data/clip1-create-new-apps.mp4",
   },
   {
     id: 2,

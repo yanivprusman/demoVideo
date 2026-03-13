@@ -82,8 +82,9 @@ async function waitForScaffolding(onStep: StepCallback, step: number, appName: s
 
 export async function executeClip1(onStep: StepCallback): Promise<string> {
   // Start screen recording
+  const outputFile = '/opt/automateLinux/data/clip1-create-new-apps.mp4';
   onStep(0, 'Starting screen recording...');
-  await sendDaemon('screenRecordStart');
+  await sendDaemon('screenRecordStart', { fileName: outputFile });
   await sleep(2000); // Extra frames before first action
 
   // Steps 1-3: Create taskManager
@@ -113,7 +114,7 @@ export async function executeClip1(onStep: StepCallback): Promise<string> {
 
   const filePath = typeof result === 'object' && result?.fileName
     ? result.fileName
-    : '/opt/automateLinux/data/screen_recording.mp4';
+    : outputFile;
 
   return filePath;
 }
