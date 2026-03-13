@@ -201,7 +201,7 @@ export default function Home() {
         <div>
           <h1 className="text-2xl font-bold">Demo Video Recorder</h1>
           <p className="text-gray-500 text-sm mt-1">
-            {doneCount}/20 clips recorded
+            {doneCount}/{clips.length} clips recorded
             {recordingClip && (
               <span className="ml-3 text-amber-400 animate-pulse">
                 Recording clip {recordingClip[0]}...

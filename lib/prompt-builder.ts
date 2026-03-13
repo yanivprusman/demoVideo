@@ -43,11 +43,11 @@ curl -s -X POST ${progressUrl} -H 'Content-Type: application/json' -d '{"clipId"
 Replace N with the step number (1, 2, 3...) and fill in the description.
 
 ## Pacing
-This is a demo video — viewers need to see what's happening:
-- Wait 1-2 seconds between actions so transitions are visible
-- For UI elements that need attention (dialogs, results), pause 3-4 seconds
-- After typing text, pause 1 second before the next action
-- Use sleep commands between steps: \`sleep 1\`, \`sleep 2\`, etc.
+Keep the video tight — viewers lose interest with dead time:
+- Move briskly between actions, pausing only ~1 second for transitions
+- For important UI results (dialogs, status changes), pause 2 seconds max
+- Do NOT add sleep commands between every step — only pause when the viewer needs time to read or see a result
+- Prefer momentum over caution: a fast demo is better than a slow one
 
 ## Tool Guidelines
 - **Browser interactions**: Use Chrome MCP tools (click via \`computer\`, find elements, navigate, read pages)
