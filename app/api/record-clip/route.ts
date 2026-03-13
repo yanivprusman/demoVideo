@@ -2,6 +2,7 @@ import { NextRequest } from 'next/server';
 import { executeClip1 } from '@/lib/clips/clip1';
 import { getClip } from '@/lib/clips';
 import { verifyPreState } from '@/lib/clips/verifyPreState';
+import { isFixable } from '@/lib/clips/fixPreState';
 
 type ClipExecutor = (onStep: (step: number, desc: string) => void) => Promise<string>;
 
@@ -39,7 +40,11 @@ export async function POST(req: NextRequest) {
       try {
         // Verify pre-state conditions before recording
         const checks = await verifyPreState(clip.preState);
-        send({ type: 'prestate', checks });
+        const enrichedChecks = checks.map(c => ({
+          ...c,
+          fixable: c.status === 'fail' ? isFixable(c.condition, c.message) : false,
+        }));
+        send({ type: 'prestate', checks: enrichedChecks });
 
         const failures = checks.filter(c => c.status === 'fail');
         if (failures.length > 0) {

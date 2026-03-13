@@ -9,6 +9,7 @@ interface PreStateCheck {
   condition: string;
   status: 'pass' | 'fail' | 'warn';
   message: string;
+  fixable?: boolean;
 }
 
 interface ClipState {
@@ -19,6 +20,7 @@ interface ClipState {
   error?: string;
   showVideo?: boolean;
   preStateChecks?: PreStateCheck[];
+  fixing?: boolean;
 }
 
 interface VideoFile {
@@ -153,7 +155,7 @@ export default function Home() {
           } else if (data.type === 'error') {
             setClipStates(prev => ({
               ...prev,
-              [clipId]: { status: 'error', error: data.message },
+              [clipId]: { ...prev[clipId], status: 'error', error: data.message },
             }));
           }
         }
@@ -166,6 +168,49 @@ export default function Home() {
       }));
     }
   }, []);
+
+  const fixAndRetry = useCallback(async (clipId: number) => {
+    setClipStates(prev => ({
+      ...prev,
+      [clipId]: { ...prev[clipId], fixing: true },
+    }));
+
+    try {
+      const response = await fetch('/api/fix-prestate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ clipId }),
+      });
+      const data = await response.json();
+
+      if (data.allPassed) {
+        // Pre-state fixed — auto-start recording
+        setClipStates(prev => ({
+          ...prev,
+          [clipId]: { ...prev[clipId], fixing: false, preStateChecks: data.recheck },
+        }));
+        recordClip(clipId);
+      } else {
+        // Some conditions couldn't be fixed
+        setClipStates(prev => ({
+          ...prev,
+          [clipId]: {
+            ...prev[clipId],
+            fixing: false,
+            preStateChecks: data.recheck,
+            status: 'error',
+            error: 'Some conditions could not be auto-fixed',
+          },
+        }));
+      }
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      setClipStates(prev => ({
+        ...prev,
+        [clipId]: { ...prev[clipId], fixing: false, status: 'error', error: 'Fix failed: ' + message },
+      }));
+    }
+  }, [recordClip]);
 
   const toggleVideo = useCallback((clipId: number) => {
     setClipStates(prev => ({
@@ -257,6 +302,7 @@ export default function Home() {
             isExpanded={expandedClips.has(clip.id)}
             onToggle={() => toggleExpand(clip.id)}
             onRecord={() => recordClip(clip.id)}
+            onFixAndRetry={() => fixAndRetry(clip.id)}
             onToggleVideo={() => toggleVideo(clip.id)}
           />
         ))}
@@ -271,6 +317,7 @@ function ClipCard({
   isExpanded,
   onToggle,
   onRecord,
+  onFixAndRetry,
   onToggleVideo,
 }: {
   clip: ClipDefinition;
@@ -278,6 +325,7 @@ function ClipCard({
   isExpanded: boolean;
   onToggle: () => void;
   onRecord: () => void;
+  onFixAndRetry: () => void;
   onToggleVideo: () => void;
 }) {
   return (
@@ -318,6 +366,9 @@ function ClipCard({
           <Section title="Post-state" items={clip.postState} color="green" />
 
           {/* Status messages */}
+          {state.fixing && (
+            <p className="text-yellow-400 text-xs animate-pulse pt-1">Auto-fixing pre-state conditions...</p>
+          )}
           {state.status === 'checking' && (
             <p className="text-blue-400 text-xs animate-pulse pt-1">Verifying pre-state conditions...</p>
           )}
@@ -353,14 +404,36 @@ function ClipCard({
             </div>
           )}
 
-          {/* Action button */}
-          <button
-            onClick={(e) => { e.stopPropagation(); onRecord(); }}
-            disabled={!clip.enabled || state.status === 'recording' || state.status === 'checking'}
-            className={`w-full py-2 rounded-lg font-medium text-sm transition-colors mt-1 ${buttonStyle(clip, state)}`}
-          >
-            {buttonLabel(state)}
-          </button>
+          {/* Action buttons */}
+          {state.status === 'error' && state.preStateChecks?.some(c => c.fixable) ? (
+            <div className="flex gap-2 mt-1">
+              <button
+                onClick={(e) => { e.stopPropagation(); onFixAndRetry(); }}
+                disabled={state.fixing}
+                className={`flex-1 py-2 rounded-lg font-medium text-sm transition-colors ${
+                  state.fixing
+                    ? 'bg-yellow-500/20 text-yellow-400 cursor-wait animate-pulse'
+                    : 'bg-yellow-600 hover:bg-yellow-500 text-white'
+                }`}
+              >
+                {state.fixing ? 'Fixing...' : 'Fix & Retry'}
+              </button>
+              <button
+                onClick={(e) => { e.stopPropagation(); onRecord(); }}
+                className="flex-1 py-2 rounded-lg font-medium text-sm transition-colors bg-red-600 hover:bg-red-500 text-white"
+              >
+                Retry
+              </button>
+            </div>
+          ) : (
+            <button
+              onClick={(e) => { e.stopPropagation(); onRecord(); }}
+              disabled={!clip.enabled || state.status === 'recording' || state.status === 'checking' || state.fixing}
+              className={`w-full py-2 rounded-lg font-medium text-sm transition-colors mt-1 ${buttonStyle(clip, state)}`}
+            >
+              {buttonLabel(state)}
+            </button>
+          )}
         </div>
       )}
     </div>
@@ -415,7 +488,10 @@ function PreStateSection({ items, checks }: { items: string[]; checks?: PreState
               <span className="mr-1.5 inline-block w-4 text-center">{icon}</span>
               {item}
               {check && check.status !== 'pass' && (
-                <span className="ml-2 text-[10px] opacity-70">({check.message})</span>
+                <span className="ml-2 text-[10px] opacity-70">
+                  ({check.message})
+                  {check.fixable && <span className="ml-1 text-yellow-400" title="Auto-fixable">{'\uD83D\uDD27'}</span>}
+                </span>
               )}
             </li>
           );
