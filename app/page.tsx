@@ -11,6 +11,7 @@ interface ClipState {
   currentStepDesc?: string;
   filePath?: string;
   error?: string;
+  showVideo?: boolean;
 }
 
 export default function Home() {
@@ -102,6 +103,16 @@ export default function Home() {
     }
   }, []);
 
+  const toggleVideo = useCallback((clipId: number) => {
+    setClipStates(prev => ({
+      ...prev,
+      [clipId]: {
+        ...prev[clipId],
+        showVideo: !prev[clipId]?.showVideo,
+      },
+    }));
+  }, []);
+
   const doneCount = Object.values(clipStates).filter(s => s.status === 'done').length;
   const recordingClip = Object.entries(clipStates).find(([, s]) => s.status === 'recording');
 
@@ -138,6 +149,7 @@ export default function Home() {
             isExpanded={expandedClips.has(clip.id)}
             onToggle={() => toggleExpand(clip.id)}
             onRecord={() => recordClip(clip.id)}
+            onToggleVideo={() => toggleVideo(clip.id)}
           />
         ))}
       </div>
@@ -151,12 +163,14 @@ function ClipCard({
   isExpanded,
   onToggle,
   onRecord,
+  onToggleVideo,
 }: {
   clip: ClipDefinition;
   state: ClipState;
   isExpanded: boolean;
   onToggle: () => void;
   onRecord: () => void;
+  onToggleVideo: () => void;
 }) {
   return (
     <div className={`rounded-lg border ${borderColor(state.status)} bg-gray-900 overflow-hidden transition-colors`}>
@@ -203,7 +217,29 @@ function ClipCard({
             <p className="text-red-400 text-xs pt-1">{state.error}</p>
           )}
           {state.status === 'done' && state.filePath && (
-            <p className="text-green-400 text-xs pt-1">Saved: {state.filePath}</p>
+            <div className="pt-1 space-y-2">
+              <div className="flex items-center gap-2">
+                <p className="text-green-400 text-xs flex-1 truncate">Saved: {state.filePath}</p>
+                <button
+                  onClick={(e) => { e.stopPropagation(); onToggleVideo(); }}
+                  className={`text-xs px-2 py-1 rounded transition-colors ${
+                    state.showVideo
+                      ? 'bg-purple-600 text-white'
+                      : 'bg-gray-800 text-gray-400 hover:bg-gray-700 hover:text-gray-200'
+                  }`}
+                >
+                  {state.showVideo ? 'Hide Video' : 'Watch'}
+                </button>
+              </div>
+              {state.showVideo && (
+                <video
+                  key={state.filePath}
+                  controls
+                  className="w-full rounded-lg border border-gray-700"
+                  src={`/api/video?path=${encodeURIComponent(state.filePath)}`}
+                />
+              )}
+            </div>
           )}
 
           {/* Action button */}
