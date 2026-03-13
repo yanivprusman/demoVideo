@@ -191,7 +191,9 @@ export default function Home() {
         }));
         recordClip(clipId);
       } else {
-        // Some conditions couldn't be fixed
+        // Some conditions couldn't be fixed — build specific message
+        const stillFailing = (data.recheck as PreStateCheck[]).filter((c: PreStateCheck) => c.status === 'fail');
+        const failMsg = stillFailing.map((c: PreStateCheck) => `${c.condition}: ${c.message}`).join('\n');
         setClipStates(prev => ({
           ...prev,
           [clipId]: {
@@ -199,7 +201,7 @@ export default function Home() {
             fixing: false,
             preStateChecks: data.recheck,
             status: 'error',
-            error: 'Some conditions could not be auto-fixed',
+            error: `Pre-state check failed:\n${failMsg}`,
           },
         }));
       }
