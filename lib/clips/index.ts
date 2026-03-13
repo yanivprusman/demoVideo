@@ -8,6 +8,8 @@ export interface ClipDefinition {
   enabled: boolean;
   outputPath?: string;
   timeoutMs?: number;
+  /** Playback speed multiplier for post-processing (default: 6). Set to 1 to skip. */
+  speedUp?: number;
 }
 
 const DATA_DIR = '/opt/automateLinux/data/demoVideo';

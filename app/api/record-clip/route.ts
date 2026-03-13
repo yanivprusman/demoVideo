@@ -5,8 +5,37 @@ import { buildPrompt } from '@/lib/prompt-builder';
 import { launchClaude, isClaudeAlive } from '@/lib/claude-launcher';
 import { getClipProgress, clearClipProgress } from '@/app/api/claude-step/route';
 import { sendDaemon, sleep } from '@/lib/daemon';
+import { execFileSync } from 'child_process';
 
 const DEMO_VIDEO_PORT = 3019;
+const DEFAULT_SPEED = 6; // 6x speed-up by default
+
+/** Speed up a video file using ffmpeg. Replaces the original file. */
+function speedUpVideo(filePath: string, speed: number): void {
+  if (speed <= 1) return;
+  const tmpPath = filePath.replace(/(\.\w+)$/, `_raw$1`);
+  // Rename original to _raw, then produce sped-up version at original path
+  execFileSync('mv', [filePath, tmpPath], { timeout: 10000 });
+  // setpts=PTS/N speeds up video by Nx, atempo handles audio (max 2x per filter, chain for higher)
+  const videoFilter = `setpts=PTS/${speed}`;
+  const atempoFilters: string[] = [];
+  let remaining = speed;
+  while (remaining > 2) {
+    atempoFilters.push('atempo=2.0');
+    remaining /= 2;
+  }
+  atempoFilters.push(`atempo=${remaining}`);
+  const audioFilter = atempoFilters.join(',');
+
+  execFileSync('ffmpeg', [
+    '-i', tmpPath,
+    '-filter:v', videoFilter,
+    '-filter:a', audioFilter,
+    '-y', filePath,
+  ], { timeout: 600000 }); // 10 min timeout for encoding
+  // Remove raw file after successful encode
+  try { execFileSync('rm', [tmpPath], { timeout: 5000 }); } catch { /* keep raw if rm fails */ }
+}
 
 export async function POST(req: NextRequest) {
   const { clipId } = await req.json();
@@ -97,6 +126,18 @@ export async function POST(req: NextRequest) {
         const filePath = typeof result === 'object' && result?.fileName
           ? result.fileName
           : outputPath;
+
+        // 8. Speed up the recording
+        const speed = clip.speedUp ?? DEFAULT_SPEED;
+        if (speed > 1) {
+          send({ type: 'step', step: clip.recordingSteps.length, description: `Speeding up ${speed}x with ffmpeg...` });
+          try {
+            speedUpVideo(filePath, speed);
+          } catch (err: unknown) {
+            const msg = err instanceof Error ? err.message : String(err);
+            send({ type: 'step', step: clip.recordingSteps.length, description: `Speed-up failed (raw video kept): ${msg}` });
+          }
+        }
 
         send({ type: 'done', filePath });
       } catch (err: unknown) {
