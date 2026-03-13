@@ -9,15 +9,15 @@ export const clip1Executor: ClipExecutor = {
       description: 'Click New App, create taskManager',
       async execute() {
         // Connect to dashboard tab
-        await cdp.connect('localhost:3007');
+        await cdp.connect(':3007');
 
         // Navigate to Apps view if not there
         await cdp.clickElement('nav-apps');
-        await sleep(500);
+        await cdp.waitForElement('new-app', 5000);
 
         // Click "New App" button
         await cdp.clickElement('new-app');
-        await sleep(800);
+        await cdp.waitForElement('app-name', 5000);
 
         // Fill in app name
         await cdp.typeInto('app-name', 'taskManager');
@@ -28,7 +28,7 @@ export const clip1Executor: ClipExecutor = {
         await sleep(300);
 
         // Click Create button
-        await cdp.clickElement('create-app-submit');
+        await cdp.clickElement('create-app');
         await sleep(1000);
       },
       verify: {
@@ -74,7 +74,7 @@ export const clip1Executor: ClipExecutor = {
       description: 'Navigate back to Apps, click New App for weatherApp',
       async execute() {
         // Switch back to dashboard
-        await cdp.switchTab('localhost:3007');
+        await cdp.switchTab(':3007');
         await sleep(500);
 
         // Navigate to Apps view
@@ -83,7 +83,7 @@ export const clip1Executor: ClipExecutor = {
 
         // Click "New App" button
         await cdp.clickElement('new-app');
-        await sleep(800);
+        await cdp.waitForElement('app-name', 5000);
 
         // Fill in app name
         await cdp.typeInto('app-name', 'weatherApp');
@@ -94,7 +94,7 @@ export const clip1Executor: ClipExecutor = {
         await sleep(300);
 
         // Click Create
-        await cdp.clickElement('create-app-submit');
+        await cdp.clickElement('create-app');
         await sleep(1000);
       },
       verify: {
@@ -136,7 +136,7 @@ export const clip1Executor: ClipExecutor = {
       description: 'Show Apps view with both apps listed',
       async execute() {
         // Switch to dashboard
-        await cdp.switchTab('localhost:3007');
+        await cdp.switchTab(':3007');
         await sleep(500);
 
         // Navigate to Apps view

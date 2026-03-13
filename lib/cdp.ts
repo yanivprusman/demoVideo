@@ -1,11 +1,6 @@
 import CDP from 'chrome-remote-interface';
 import { sendDaemon, sleep } from './daemon';
 
-// Chrome window offset on DP-1 when maximized
-// Tab bar + bookmarks bar height. Calibrate if Chrome layout changes.
-const CHROME_OFFSET_X = 0;
-const CHROME_OFFSET_Y = 90;
-
 const CDP_PORT = 9222;
 
 interface TabInfo {
@@ -15,8 +10,21 @@ interface TabInfo {
   webSocketDebuggerUrl: string;
 }
 
+interface WindowGeometry {
+  screenX: number;
+  screenY: number;
+  outerWidth: number;
+  outerHeight: number;
+  innerWidth: number;
+  innerHeight: number;
+  devicePixelRatio: number;
+  /** Device-pixel offset from window top to viewport top (Chrome UI height) */
+  chromeUiHeight: number;
+}
+
 let activeClient: CDP.Client | null = null;
 let activeTabId: string | null = null;
+let cachedGeometry: WindowGeometry | null = null;
 
 /**
  * List all Chrome tabs via CDP.
@@ -53,7 +61,51 @@ export async function connect(urlFragment: string): Promise<CDP.Client> {
 
   activeClient = await CDP({ target: tab.id, port: CDP_PORT });
   activeTabId = tab.id;
+
+  // Activate this tab in Chrome (make it the visible tab)
+  try {
+    const cdpHttp = await import('http');
+    await new Promise<void>((resolve, reject) => {
+      const req = cdpHttp.get(`http://localhost:${CDP_PORT}/json/activate/${tab.id}`, (res) => {
+        res.resume();
+        res.on('end', resolve);
+      });
+      req.on('error', reject);
+      req.setTimeout(3000, () => { req.destroy(); reject(new Error('activate timeout')); });
+    });
+    await sleep(300); // Let tab switch settle
+  } catch { /* non-critical — tab may already be active */ }
+
+  // Calibrate window geometry on each new connection
+  await calibrate();
+
   return activeClient;
+}
+
+/**
+ * Read Chrome window geometry and compute coordinate offsets.
+ * getBoundingClientRect() returns CSS pixels; daemon uses device pixels.
+ * We need: screen_x = screenX + (cssX * DPR)
+ *          screen_y = screenY + chromeUiHeight + (cssY * DPR)
+ */
+async function calibrate(): Promise<void> {
+  const client = getClient();
+  const result = await client.Runtime.evaluate({
+    expression: `({
+      screenX: window.screenX,
+      screenY: window.screenY,
+      outerWidth: window.outerWidth,
+      outerHeight: window.outerHeight,
+      innerWidth: window.innerWidth,
+      innerHeight: window.innerHeight,
+      devicePixelRatio: window.devicePixelRatio,
+    })`,
+    returnByValue: true,
+  });
+  const w = result.result.value;
+  // Chrome UI height in device pixels = outerHeight - (innerHeight * DPR)
+  const chromeUiHeight = Math.round(w.outerHeight - w.innerHeight * w.devicePixelRatio);
+  cachedGeometry = { ...w, chromeUiHeight };
 }
 
 /**
@@ -64,6 +116,7 @@ export async function disconnect(): Promise<void> {
     try { await activeClient.close(); } catch { /* already closed */ }
     activeClient = null;
     activeTabId = null;
+    cachedGeometry = null;
   }
 }
 
@@ -102,13 +155,17 @@ export async function getElementCenter(dataId: string): Promise<{ x: number; y: 
 }
 
 /**
- * Convert page-relative coordinates to screen coordinates.
- * Accounts for Chrome window position and tab bar offset on DP-1.
+ * Convert CSS page-relative coordinates to device-pixel screen coordinates.
+ * Uses calibrated window geometry (DPR, window position, Chrome UI height).
  */
 export function toScreenCoords(pageX: number, pageY: number): { x: number; y: number } {
+  if (!cachedGeometry) {
+    throw new Error('Window geometry not calibrated. Call connect() first.');
+  }
+  const { screenX, screenY, devicePixelRatio: dpr, chromeUiHeight } = cachedGeometry;
   return {
-    x: Math.round(pageX + CHROME_OFFSET_X),
-    y: Math.round(pageY + CHROME_OFFSET_Y),
+    x: Math.round(screenX + pageX * dpr),
+    y: Math.round(screenY + chromeUiHeight + pageY * dpr),
   };
 }
 
@@ -127,11 +184,27 @@ export async function clickElement(dataId: string): Promise<void> {
 }
 
 /**
- * Click an element and type into it using daemon keyboardType (visible on screen).
+ * Click an element, clear it, and type into it using daemon keyboardType (visible on screen).
  */
 export async function typeInto(dataId: string, text: string): Promise<void> {
   await clickElement(dataId);
   await sleep(200);
+  // Select all existing text and delete it first
+  const client = getClient();
+  await client.Runtime.evaluate({
+    expression: `
+      (function() {
+        const el = document.querySelector('[data-id="${dataId}"]');
+        if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA')) {
+          el.select();
+        }
+      })()
+    `,
+  });
+  await sleep(100);
+  // Delete selected text via keyboard
+  await sendDaemon('keyboardKey', { key: '119:1 119:0' }); // Delete key
+  await sleep(100);
   await sendDaemon('keyboardType', { string: text });
   await sleep(200);
 }
