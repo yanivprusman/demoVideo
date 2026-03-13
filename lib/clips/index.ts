@@ -7,7 +7,10 @@ export interface ClipDefinition {
   postState: string[];
   enabled: boolean;
   outputPath?: string;
+  timeoutMs?: number;
 }
+
+const DATA_DIR = '/opt/automateLinux/data/demoVideo';
 
 export const clips: ClipDefinition[] = [
   {
@@ -37,7 +40,8 @@ export const clips: ClipDefinition[] = [
       "Two create-app tabs may still be open",
     ],
     enabled: true,
-    outputPath: "/opt/automateLinux/data/demoVideo/clip1-create-new-apps.mp4",
+    outputPath: `${DATA_DIR}/clip1-create-new-apps.mp4`,
+    timeoutMs: 600000, // 10 min — scaffolding is slow
   },
   {
     id: 2,
@@ -67,7 +71,8 @@ export const clips: ClipDefinition[] = [
       "Dashboard showing Issues view with both apps' issues visible",
       "Sidebar shows total open count badge",
     ],
-    enabled: false,
+    enabled: true,
+    outputPath: `${DATA_DIR}/clip2-create-issues.mp4`,
   },
   {
     id: 3,
@@ -96,7 +101,8 @@ export const clips: ClipDefinition[] = [
       "Issue #3 may have toggled labels",
       "Dashboard showing Issues view, detail panel closed",
     ],
-    enabled: false,
+    enabled: true,
+    outputPath: `${DATA_DIR}/clip3-issue-detail-context-menu.mp4`,
   },
   {
     id: 4,
@@ -129,7 +135,8 @@ export const clips: ClipDefinition[] = [
       "weatherApp issues: unchanged (all open)",
       "Dashboard + terminal both visible",
     ],
-    enabled: false,
+    enabled: true,
+    outputPath: `${DATA_DIR}/clip4-issue-lifecycle-labels.mp4`,
   },
   {
     id: 5,
@@ -164,7 +171,8 @@ export const clips: ClipDefinition[] = [
       "No issues launched — dialog was cancelled",
       "Dashboard showing Issues view, no state changes",
     ],
-    enabled: false,
+    enabled: true,
+    outputPath: `${DATA_DIR}/clip5-fix-with-claude-dialog.mp4`,
   },
   {
     id: 6,
@@ -195,7 +203,9 @@ export const clips: ClipDefinition[] = [
       "Session ID linked to issue #2",
       "Terminal on right shows Claude session",
     ],
-    enabled: false,
+    enabled: true,
+    outputPath: `${DATA_DIR}/clip6-launch-claude-session-tracking.mp4`,
+    timeoutMs: 600000,
   },
   {
     id: 7,
@@ -220,7 +230,8 @@ export const clips: ClipDefinition[] = [
       "Dashboard showing Claude sessions tab",
       "Session title may have been renamed",
     ],
-    enabled: false,
+    enabled: true,
+    outputPath: `${DATA_DIR}/clip7-claude-sessions-deep-dive.mp4`,
   },
   {
     id: 8,
@@ -246,7 +257,8 @@ export const clips: ClipDefinition[] = [
       "Issue #2 has 2+ session IDs",
       "Additional Claude session created (now closed)",
     ],
-    enabled: false,
+    enabled: true,
+    outputPath: `${DATA_DIR}/clip8-session-resume-history.mp4`,
   },
   {
     id: 9,
@@ -272,7 +284,9 @@ export const clips: ClipDefinition[] = [
       "weatherApp issue #1: in_progress",
       "New Claude session active",
     ],
-    enabled: false,
+    enabled: true,
+    outputPath: `${DATA_DIR}/clip9-scheduled-launches.mp4`,
+    timeoutMs: 600000,
   },
   {
     id: 10,
@@ -297,7 +311,8 @@ export const clips: ClipDefinition[] = [
       "Dashboard showing hook events",
       "Session still active or completed",
     ],
-    enabled: false,
+    enabled: true,
+    outputPath: `${DATA_DIR}/clip10-hooks-system.mp4`,
   },
   {
     id: 11,
@@ -321,7 +336,8 @@ export const clips: ClipDefinition[] = [
     postState: [
       "Terminal showing Claude with MCP tool output",
     ],
-    enabled: false,
+    enabled: true,
+    outputPath: `${DATA_DIR}/clip11-mcp-daemon-tools.mp4`,
   },
   {
     id: 12,
@@ -346,7 +362,8 @@ export const clips: ClipDefinition[] = [
       "Desktop may have rearranged windows",
       "Demonstration of each automation capability shown",
     ],
-    enabled: false,
+    enabled: true,
+    outputPath: `${DATA_DIR}/clip12-desktop-automation.mp4`,
   },
   {
     id: 13,
@@ -371,7 +388,8 @@ export const clips: ClipDefinition[] = [
       "Dashboard showing Peers tab",
       "Terminal showing peer command outputs",
     ],
-    enabled: false,
+    enabled: true,
+    outputPath: `${DATA_DIR}/clip13-multi-peer-network.mp4`,
   },
   {
     id: 14,
@@ -396,7 +414,8 @@ export const clips: ClipDefinition[] = [
       "Clock may have moved to new position",
       "Terminal window activated from session click",
     ],
-    enabled: false,
+    enabled: true,
+    outputPath: `${DATA_DIR}/clip14-gnome-clock-extension.mp4`,
   },
   {
     id: 15,
@@ -419,7 +438,8 @@ export const clips: ClipDefinition[] = [
     postState: [
       "Terminal showing permission examples",
     ],
-    enabled: false,
+    enabled: true,
+    outputPath: `${DATA_DIR}/clip15-permission-system.mp4`,
   },
   {
     id: 16,
@@ -445,7 +465,8 @@ export const clips: ClipDefinition[] = [
       "Test issue #4 deleted",
       "Git log shows create/update/delete commits",
     ],
-    enabled: false,
+    enabled: true,
+    outputPath: `${DATA_DIR}/clip16-git-sync-issue-storage.mp4`,
   },
   {
     id: 17,
@@ -472,7 +493,8 @@ export const clips: ClipDefinition[] = [
       "taskManager running",
       "Dashboard Apps view showing all app statuses",
     ],
-    enabled: false,
+    enabled: true,
+    outputPath: `${DATA_DIR}/clip17-app-lifecycle.mp4`,
   },
   {
     id: 18,
@@ -494,7 +516,9 @@ export const clips: ClipDefinition[] = [
       "One issue moved to review via skill workflow",
       "Commit pushed with issue reference",
     ],
-    enabled: false,
+    enabled: true,
+    outputPath: `${DATA_DIR}/clip18-skills-system.mp4`,
+    timeoutMs: 600000,
   },
   {
     id: 19,
@@ -517,7 +541,8 @@ export const clips: ClipDefinition[] = [
     postState: [
       "Terminal showing helper function outputs",
     ],
-    enabled: false,
+    enabled: true,
+    outputPath: `${DATA_DIR}/clip19-terminal-wrapper-helpers.mp4`,
   },
   {
     id: 20,
@@ -532,7 +557,8 @@ export const clips: ClipDefinition[] = [
     postState: [
       "Final merged video file",
     ],
-    enabled: false,
+    enabled: false, // Not Claude-orchestrated — handled separately
+    outputPath: `${DATA_DIR}/demo-video-final.mp4`,
   },
 ];
 

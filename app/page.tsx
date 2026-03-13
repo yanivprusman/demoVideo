@@ -1,16 +1,9 @@
 'use client';
 
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { clips, type ClipDefinition } from '@/lib/clips';
 
-type ClipStatus = 'idle' | 'checking' | 'recording' | 'done' | 'error';
-
-interface PreStateCheck {
-  condition: string;
-  status: 'pass' | 'fail' | 'warn';
-  message: string;
-  fixable?: boolean;
-}
+type ClipStatus = 'idle' | 'recording' | 'done' | 'error';
 
 interface ClipState {
   status: ClipStatus;
@@ -19,8 +12,7 @@ interface ClipState {
   filePath?: string;
   error?: string;
   showVideo?: boolean;
-  preStateChecks?: PreStateCheck[];
-  fixing?: boolean;
+  recordingStartedAt?: number;
 }
 
 interface VideoFile {
@@ -47,12 +39,7 @@ export default function Home() {
         const id = data.clipId as number;
         if (!id) return;
 
-        if (data.type === 'prestate') {
-          setClipStates(prev => ({
-            ...prev,
-            [id]: { ...prev[id], status: 'checking', preStateChecks: data.checks, currentStepDesc: 'Pre-state verified' },
-          }));
-        } else if (data.type === 'step') {
+        if (data.type === 'step') {
           setClipStates(prev => ({
             ...prev,
             [id]: { ...prev[id], status: 'recording', currentStep: data.step, currentStepDesc: data.description },
@@ -130,7 +117,7 @@ export default function Home() {
   const recordClip = useCallback(async (clipId: number) => {
     setClipStates(prev => ({
       ...prev,
-      [clipId]: { status: 'checking', currentStepDesc: 'Verifying pre-state...' },
+      [clipId]: { status: 'recording', currentStepDesc: 'Starting...', recordingStartedAt: Date.now() },
     }));
 
     try {
@@ -162,17 +149,7 @@ export default function Home() {
           if (!line.startsWith('data: ')) continue;
           const data = JSON.parse(line.slice(6));
 
-          if (data.type === 'prestate') {
-            setClipStates(prev => ({
-              ...prev,
-              [clipId]: {
-                ...prev[clipId],
-                status: 'checking',
-                preStateChecks: data.checks,
-                currentStepDesc: 'Pre-state verified',
-              },
-            }));
-          } else if (data.type === 'step') {
+          if (data.type === 'step') {
             setClipStates(prev => ({
               ...prev,
               [clipId]: {
@@ -203,51 +180,6 @@ export default function Home() {
       }));
     }
   }, []);
-
-  const fixAndRetry = useCallback(async (clipId: number) => {
-    setClipStates(prev => ({
-      ...prev,
-      [clipId]: { ...prev[clipId], fixing: true },
-    }));
-
-    try {
-      const response = await fetch('/api/fix-prestate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ clipId }),
-      });
-      const data = await response.json();
-
-      if (data.allPassed) {
-        // Pre-state fixed — auto-start recording
-        setClipStates(prev => ({
-          ...prev,
-          [clipId]: { ...prev[clipId], fixing: false, preStateChecks: data.recheck },
-        }));
-        recordClip(clipId);
-      } else {
-        // Some conditions couldn't be fixed — build specific message
-        const stillFailing = (data.recheck as PreStateCheck[]).filter((c: PreStateCheck) => c.status === 'fail');
-        const failMsg = stillFailing.map((c: PreStateCheck) => `${c.condition}: ${c.message}`).join('\n');
-        setClipStates(prev => ({
-          ...prev,
-          [clipId]: {
-            ...prev[clipId],
-            fixing: false,
-            preStateChecks: data.recheck,
-            status: 'error',
-            error: `Pre-state check failed:\n${failMsg}`,
-          },
-        }));
-      }
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : String(err);
-      setClipStates(prev => ({
-        ...prev,
-        [clipId]: { ...prev[clipId], fixing: false, status: 'error', error: 'Fix failed: ' + message },
-      }));
-    }
-  }, [recordClip]);
 
   const toggleVideo = useCallback((clipId: number) => {
     setClipStates(prev => ({
@@ -339,7 +271,6 @@ export default function Home() {
             isExpanded={expandedClips.has(clip.id)}
             onToggle={() => toggleExpand(clip.id)}
             onRecord={() => recordClip(clip.id)}
-            onFixAndRetry={() => fixAndRetry(clip.id)}
             onToggleVideo={() => toggleVideo(clip.id)}
           />
         ))}
@@ -354,7 +285,6 @@ function ClipCard({
   isExpanded,
   onToggle,
   onRecord,
-  onFixAndRetry,
   onToggleVideo,
 }: {
   clip: ClipDefinition;
@@ -362,7 +292,6 @@ function ClipCard({
   isExpanded: boolean;
   onToggle: () => void;
   onRecord: () => void;
-  onFixAndRetry: () => void;
   onToggleVideo: () => void;
 }) {
   return (
@@ -392,7 +321,7 @@ function ClipCard({
       {/* Expanded */}
       {isExpanded && (
         <div className="px-3 pb-3 space-y-2 border-t border-gray-800/50">
-          <PreStateSection items={clip.preState} checks={state.preStateChecks} />
+          <Section title="Pre-state" items={clip.preState} color="blue" />
           <Section
             title="Recording Steps"
             items={clip.recordingSteps}
@@ -403,14 +332,13 @@ function ClipCard({
           <Section title="Post-state" items={clip.postState} color="green" />
 
           {/* Status messages */}
-          {state.fixing && (
-            <p className="text-yellow-400 text-xs animate-pulse pt-1">Auto-fixing pre-state conditions...</p>
-          )}
-          {state.status === 'checking' && (
-            <p className="text-blue-400 text-xs animate-pulse pt-1">Verifying pre-state conditions...</p>
-          )}
-          {state.status === 'recording' && state.currentStepDesc && (
-            <p className="text-amber-400 text-xs animate-pulse pt-1">{state.currentStepDesc}</p>
+          {state.status === 'recording' && (
+            <div className="pt-1 space-y-1">
+              <p className="text-amber-400 text-xs animate-pulse">
+                {state.currentStepDesc || 'Claude is working...'}
+              </p>
+              <ElapsedTimer startedAt={state.recordingStartedAt} />
+            </div>
           )}
           {state.status === 'error' && (
             <p className="text-red-400 text-xs pt-1">{state.error}</p>
@@ -441,48 +369,47 @@ function ClipCard({
             </div>
           )}
 
-          {/* Action buttons */}
-          {state.status === 'error' && state.preStateChecks?.some(c => c.fixable) ? (
-            <div className="flex gap-2 mt-1">
-              <button
-                onClick={(e) => { e.stopPropagation(); onFixAndRetry(); }}
-                disabled={state.fixing}
-                className={`flex-1 py-2 rounded-lg font-medium text-sm transition-colors ${
-                  state.fixing
-                    ? 'bg-yellow-500/20 text-yellow-400 cursor-wait animate-pulse'
-                    : 'bg-yellow-600 hover:bg-yellow-500 text-white'
-                }`}
-              >
-                {state.fixing ? 'Fixing...' : 'Fix & Retry'}
-              </button>
-              <button
-                onClick={(e) => { e.stopPropagation(); onRecord(); }}
-                className="flex-1 py-2 rounded-lg font-medium text-sm transition-colors bg-red-600 hover:bg-red-500 text-white"
-              >
-                Retry
-              </button>
-            </div>
-          ) : (
-            <button
-              onClick={(e) => { e.stopPropagation(); onRecord(); }}
-              disabled={!clip.enabled || state.status === 'recording' || state.status === 'checking' || state.fixing}
-              className={`w-full py-2 rounded-lg font-medium text-sm transition-colors mt-1 ${buttonStyle(clip, state)}`}
-            >
-              {buttonLabel(state)}
-            </button>
-          )}
+          {/* Action button */}
+          <button
+            onClick={(e) => { e.stopPropagation(); onRecord(); }}
+            disabled={!clip.enabled || state.status === 'recording'}
+            className={`w-full py-2 rounded-lg font-medium text-sm transition-colors mt-1 ${buttonStyle(clip, state)}`}
+          >
+            {buttonLabel(state)}
+          </button>
         </div>
       )}
     </div>
   );
 }
 
+function ElapsedTimer({ startedAt }: { startedAt?: number }) {
+  const [elapsed, setElapsed] = useState('0:00');
+  const intervalRef = useRef<ReturnType<typeof setInterval> | undefined>(undefined);
+
+  useEffect(() => {
+    if (!startedAt) return;
+    const update = () => {
+      const secs = Math.floor((Date.now() - startedAt) / 1000);
+      const m = Math.floor(secs / 60);
+      const s = secs % 60;
+      setElapsed(`${m}:${s.toString().padStart(2, '0')}`);
+    };
+    update();
+    intervalRef.current = setInterval(update, 1000);
+    return () => clearInterval(intervalRef.current);
+  }, [startedAt]);
+
+  return (
+    <p className="text-gray-500 text-[10px]">
+      Elapsed: {elapsed}
+    </p>
+  );
+}
+
 function StatusBadge({ status, step, total }: { status: ClipStatus; step?: number; total: number }) {
-  if (status === 'checking') {
-    return <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-blue-500/20 text-blue-400 animate-pulse">Checking...</span>;
-  }
   if (status === 'recording') {
-    return <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-amber-500/20 text-amber-400 animate-pulse">{step}/{total}</span>;
+    return <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-amber-500/20 text-amber-400 animate-pulse">{step !== undefined ? `${step}/${total}` : 'Claude...'}</span>;
   }
   if (status === 'done') {
     return <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-green-500/20 text-green-400">Done</span>;
@@ -491,51 +418,6 @@ function StatusBadge({ status, step, total }: { status: ClipStatus; step?: numbe
     return <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-red-500/20 text-red-400">Error</span>;
   }
   return null;
-}
-
-function PreStateSection({ items, checks }: { items: string[]; checks?: PreStateCheck[] }) {
-  const checkMap = new Map<string, PreStateCheck>();
-  if (checks) {
-    for (const check of checks) {
-      checkMap.set(check.condition, check);
-    }
-  }
-
-  return (
-    <div className="pt-2">
-      <h4 className="text-[10px] font-semibold uppercase tracking-wider mb-1 text-blue-400">
-        Pre-state
-      </h4>
-      <ul className="space-y-0.5">
-        {items.map((item, i) => {
-          const check = checkMap.get(item);
-          const icon = check
-            ? check.status === 'pass' ? '\u2705'
-            : check.status === 'fail' ? '\u274C'
-            : '\u26A0\uFE0F'
-            : '\u2022';
-          const textColor = check
-            ? check.status === 'pass' ? 'text-green-400'
-            : check.status === 'fail' ? 'text-red-400'
-            : 'text-yellow-400'
-            : 'text-gray-400';
-
-          return (
-            <li key={i} className={`text-xs leading-relaxed ${textColor}`}>
-              <span className="mr-1.5 inline-block w-4 text-center">{icon}</span>
-              {item}
-              {check && check.status !== 'pass' && (
-                <span className="ml-2 text-[10px] opacity-70">
-                  ({check.message})
-                  {check.fixable && <span className="ml-1 text-yellow-400" title="Auto-fixable">{'\uD83D\uDD27'}</span>}
-                </span>
-              )}
-            </li>
-          );
-        })}
-      </ul>
-    </div>
-  );
 }
 
 function Section({
@@ -590,7 +472,6 @@ function Section({
 
 function borderColor(status: ClipStatus) {
   switch (status) {
-    case 'checking': return 'border-blue-500/50';
     case 'recording': return 'border-amber-500/50';
     case 'done': return 'border-green-500/30';
     case 'error': return 'border-red-500/30';
@@ -599,7 +480,6 @@ function borderColor(status: ClipStatus) {
 }
 
 function numberStyle(clip: ClipDefinition, state: ClipState) {
-  if (state.status === 'checking') return 'bg-blue-500 text-white';
   if (state.status === 'recording') return 'bg-amber-500 text-black';
   if (state.status === 'done') return 'bg-green-600 text-white';
   if (state.status === 'error') return 'bg-red-600 text-white';
@@ -608,7 +488,6 @@ function numberStyle(clip: ClipDefinition, state: ClipState) {
 }
 
 function buttonStyle(clip: ClipDefinition, state: ClipState) {
-  if (state.status === 'checking') return 'bg-blue-500/20 text-blue-400 cursor-wait';
   if (state.status === 'recording') return 'bg-amber-500/20 text-amber-400 cursor-wait';
   if (!clip.enabled) return 'bg-gray-800 text-gray-600 cursor-not-allowed';
   if (state.status === 'done') return 'bg-blue-600 hover:bg-blue-500 text-white';
@@ -618,7 +497,6 @@ function buttonStyle(clip: ClipDefinition, state: ClipState) {
 
 function buttonLabel(state: ClipState) {
   switch (state.status) {
-    case 'checking': return 'Checking...';
     case 'recording': return 'Recording...';
     case 'done': return 'Re-record';
     case 'error': return 'Retry';

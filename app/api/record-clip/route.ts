@@ -1,18 +1,12 @@
 import { NextRequest } from 'next/server';
-import { executeClip1 } from '@/lib/clips/clip1';
 import { getClip } from '@/lib/clips';
-import { verifyPreState } from '@/lib/clips/verifyPreState';
-import { isFixable } from '@/lib/clips/fixPreState';
 import { broadcast } from '@/lib/broadcast';
+import { buildPrompt } from '@/lib/prompt-builder';
+import { launchClaude, isClaudeAlive } from '@/lib/claude-launcher';
+import { getClipProgress, clearClipProgress } from '@/app/api/claude-step/route';
+import { sendDaemon, sleep } from '@/lib/daemon';
 
-type ClipExecutor = (onStep: (step: number, desc: string) => void) => Promise<string>;
-
-function getClipExecutor(clipId: number): ClipExecutor | null {
-  switch (clipId) {
-    case 1: return executeClip1;
-    default: return null;
-  }
-}
+const DEMO_VIDEO_PORT = 3019;
 
 export async function POST(req: NextRequest) {
   const { clipId } = await req.json();
@@ -26,10 +20,12 @@ export async function POST(req: NextRequest) {
     return Response.json({ error: `Clip ${clipId} is not enabled yet` }, { status: 400 });
   }
 
-  const executor = getClipExecutor(clipId);
-  if (!executor) {
-    return Response.json({ error: `Clip ${clipId} has no executor implemented` }, { status: 501 });
+  // Clip 20 is ffmpeg merge, not Claude-orchestrated
+  if (clipId === 20) {
+    return Response.json({ error: 'Clip 20 (Final Merge) is not Claude-orchestrated' }, { status: 400 });
   }
+
+  const outputPath = clip.outputPath || `/opt/automateLinux/data/demoVideo/clip${clipId}.mp4`;
 
   const encoder = new TextEncoder();
   const stream = new ReadableStream({
@@ -40,29 +36,73 @@ export async function POST(req: NextRequest) {
       };
 
       try {
-        // Verify pre-state conditions before recording
-        const checks = await verifyPreState(clip.preState);
-        const enrichedChecks = checks.map(c => ({
-          ...c,
-          fixable: c.status === 'fail' ? isFixable(c.condition, c.message) : false,
-        }));
-        send({ type: 'prestate', checks: enrichedChecks });
+        // Clear any previous progress for this clip
+        clearClipProgress(clipId);
 
-        const failures = checks.filter(c => c.status === 'fail');
-        if (failures.length > 0) {
-          const msg = failures.map(f => `${f.condition}: ${f.message}`).join('\n');
-          send({ type: 'error', message: `Pre-state check failed:\n${msg}` });
-          controller.close();
-          return;
+        // 1. Generate prompt
+        const prompt = buildPrompt(clip, DEMO_VIDEO_PORT);
+        send({ type: 'step', step: 0, description: 'Starting screen recording...' });
+
+        // 2. Start screen recording
+        await sendDaemon('screenRecordStart', { fileName: outputPath });
+
+        // 3. Wait 2s warmup
+        await sleep(2000);
+
+        // 4. Launch Claude in tmux
+        send({ type: 'step', step: 0, description: 'Launching Claude...' });
+        const { scriptLogFile } = launchClaude(prompt, clipId);
+
+        // 5. Poll for completion
+        const timeoutMs = (clip as any).timeoutMs || 300000; // 5 min default
+        const startTime = Date.now();
+        let lastStep = -99;
+
+        while (Date.now() - startTime < timeoutMs) {
+          await sleep(2000);
+
+          const progress = getClipProgress(clipId);
+          if (progress && progress.step !== lastStep) {
+            lastStep = progress.step;
+
+            if (progress.step === -1) {
+              // Claude signaled completion
+              send({ type: 'step', step: clip.recordingSteps.length, description: 'Claude finished — stopping recording' });
+              break;
+            }
+
+            send({ type: 'step', step: progress.step, description: progress.description });
+          }
+
+          // Check if Claude process is still alive
+          if (!isClaudeAlive(scriptLogFile)) {
+            if (lastStep !== -1) {
+              // Claude died without signaling completion
+              send({ type: 'step', step: clip.recordingSteps.length, description: 'Claude process ended — stopping recording' });
+            }
+            break;
+          }
         }
 
-        // All checks passed (or warnings only) — proceed with recording
-        const filePath = await executor((step: number, description: string) => {
-          send({ type: 'step', step, description });
-        });
+        // Check for timeout
+        if (Date.now() - startTime >= timeoutMs && lastStep !== -1) {
+          send({ type: 'step', step: clip.recordingSteps.length, description: 'Timeout reached — stopping recording' });
+        }
+
+        // 6. Wait 2s trailing frames
+        await sleep(2000);
+
+        // 7. Stop screen recording
+        const result = await sendDaemon('screenRecordStop');
+        const filePath = typeof result === 'object' && result?.fileName
+          ? result.fileName
+          : outputPath;
+
         send({ type: 'done', filePath });
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : String(err);
+        // Try to stop recording on error
+        try { await sendDaemon('screenRecordStop'); } catch { /* ignore */ }
         send({ type: 'error', message });
       }
 
