@@ -10,13 +10,34 @@ export interface FixResult {
 
 type Fixer = (condition: string, failMessage: string) => Promise<FixResult | null>;
 
-// Launch a GUI app with DISPLAY set
+// Find Wayland XAUTHORITY (changes every reboot)
+import { readdirSync } from 'fs';
+function findXauthority(): string | undefined {
+  try {
+    const uid = process.getuid?.() || 1000;
+    const dir = `/run/user/${uid}`;
+    const files = readdirSync(dir);
+    const auth = files.find(f => f.startsWith('.mutter-Xwaylandauth.'));
+    return auth ? `${dir}/${auth}` : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+// Launch a GUI app with display env vars for Wayland/X11
 function launchGui(command: string): Promise<void> {
   return new Promise((resolve) => {
-    exec(command, {
-      env: { ...process.env, DISPLAY: ':0' },
-      timeout: 5000,
-    }, () => resolve());
+    const uid = process.getuid?.() || 1000;
+    const env: Record<string, string> = {
+      ...process.env as Record<string, string>,
+      DISPLAY: ':0',
+      WAYLAND_DISPLAY: 'wayland-0',
+      XDG_RUNTIME_DIR: `/run/user/${uid}`,
+    };
+    const xauth = findXauthority();
+    if (xauth) env.XAUTHORITY = xauth;
+
+    exec(command, { env, timeout: 10000 }, () => resolve());
   });
 }
 
@@ -39,14 +60,14 @@ const fixers: Fixer[] = [
       await sleep(4000);
       const url = await getDashboardUrl();
       await launchGui(`google-chrome-stable '${url}/apps' &`);
-      await sleep(3000);
+      await sleep(5000);
       return { condition: c, fixed: true, message: 'Started dashboard and opened in Chrome' };
     }
 
     if (/no dashboard window/i.test(msg)) {
       const url = await getDashboardUrl();
       await launchGui(`google-chrome-stable '${url}/apps' &`);
-      await sleep(3000);
+      await sleep(5000);
       return { condition: c, fixed: true, message: 'Opened dashboard in Chrome' };
     }
 
@@ -101,7 +122,7 @@ const fixers: Fixer[] = [
     if (/no dashboard window/i.test(msg)) {
       const url = await getDashboardUrl();
       await launchGui(`google-chrome-stable '${url}/apps' &`);
-      await sleep(3000);
+      await sleep(5000);
       return { condition: c, fixed: true, message: 'Opened dashboard in Chrome' };
     }
 
