@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { clips, type ClipDefinition } from '@/lib/clips';
 
 type ClipStatus = 'idle' | 'recording' | 'done' | 'error';
@@ -14,10 +14,27 @@ interface ClipState {
   showVideo?: boolean;
 }
 
+interface VideoFile {
+  name: string;
+  path: string;
+  size: number;
+  modified: string;
+}
+
 export default function Home() {
   const [clipStates, setClipStates] = useState<Record<number, ClipState>>({});
   const [expandedClips, setExpandedClips] = useState<Set<number>>(new Set([1]));
   const [allExpanded, setAllExpanded] = useState(false);
+  const [videos, setVideos] = useState<VideoFile[]>([]);
+  const [activeVideo, setActiveVideo] = useState<string | null>(null);
+  const [showVideos, setShowVideos] = useState(false);
+
+  useEffect(() => {
+    fetch('/api/videos')
+      .then(r => r.json())
+      .then(setVideos)
+      .catch(() => {});
+  }, []);
 
   const toggleExpand = useCallback((id: number) => {
     setExpandedClips(prev => {
@@ -137,6 +154,50 @@ export default function Home() {
         >
           {allExpanded ? 'Collapse All' : 'Expand All'}
         </button>
+      </div>
+
+      {/* Videos Section */}
+      <div className="mb-6">
+        <button
+          onClick={() => setShowVideos(!showVideos)}
+          className="flex items-center gap-2 text-sm px-3 py-1.5 rounded-lg bg-purple-900/30 hover:bg-purple-900/50 text-purple-300 transition-colors border border-purple-800/30"
+        >
+          <span>{showVideos ? '\u25B2' : '\u25BC'}</span>
+          Recorded Videos ({videos.length})
+        </button>
+
+        {showVideos && (
+          <div className="mt-3 space-y-2">
+            {videos.length === 0 && (
+              <p className="text-gray-500 text-sm">No recorded videos found.</p>
+            )}
+            {videos.map(v => (
+              <div key={v.path} className="rounded-lg border border-gray-800 bg-gray-900 overflow-hidden">
+                <div
+                  className="flex items-center gap-3 p-2 cursor-pointer hover:bg-gray-800/50 transition-colors"
+                  onClick={() => setActiveVideo(activeVideo === v.path ? null : v.path)}
+                >
+                  <span className={`text-xs px-2 py-0.5 rounded ${activeVideo === v.path ? 'bg-purple-600 text-white' : 'bg-gray-800 text-gray-400'}`}>
+                    {activeVideo === v.path ? 'Hide' : 'Watch'}
+                  </span>
+                  <span className="text-sm text-gray-200 flex-1 truncate">{v.name}</span>
+                  <span className="text-xs text-gray-500">{formatSize(v.size)}</span>
+                  <span className="text-xs text-gray-600">{new Date(v.modified).toLocaleDateString()}</span>
+                </div>
+                {activeVideo === v.path && (
+                  <div className="px-2 pb-2">
+                    <video
+                      key={v.path}
+                      controls
+                      className="w-full rounded-lg border border-gray-700"
+                      src={`/api/video?path=${encodeURIComponent(v.path)}`}
+                    />
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Clip Grid */}
@@ -351,4 +412,10 @@ function buttonLabel(state: ClipState) {
     case 'error': return 'Retry';
     default: return 'Record';
   }
+}
+
+function formatSize(bytes: number): string {
+  if (bytes < 1024) return bytes + ' B';
+  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(0) + ' KB';
+  return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
 }
