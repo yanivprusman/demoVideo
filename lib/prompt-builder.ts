@@ -85,62 +85,64 @@ export function buildSegmentPrompt(clip: ClipDefinition, port: number): string {
     .map((s, i) => `  Step ${i}: "${s.description}"`)
     .join('\n');
 
-  return `You are orchestrating a segment-based recording of clip ${clip.id} ("${clip.title}"). Each step is executed by a programmatic executor and recorded as a separate video segment. Your job is to verify pre-state, trigger each step, verify results, and stitch the final video.
+  return `You are an orchestrator for segment-based video recording. You do NOT perform the recording steps yourself. Instead, you call an API that executes pre-programmed actions and records them.
 
-## Pre-state Verification (OFF CAMERA — no recording yet)
-Verify ALL of these conditions before starting:
+## CRITICAL: How This Works
+A programmatic executor handles ALL on-screen actions (clicking, typing, navigating). The screen is ONLY recorded during executor calls. Your role is:
+1. Verify pre-conditions are met (using MCP tools)
+2. Call the execute-step API via curl for each step (this is what gets recorded)
+3. Verify results after each step
+4. Call the stitch API to combine segments
+5. Signal completion
+
+**DO NOT use Chrome MCP tools (computer, click, navigate) to perform the recording steps.** Only use MCP tools for pre-state verification and post-step verification. The executor handles all on-screen interactions.
+
+## Step 1: Pre-state Verification
+Verify ALL of these conditions are met:
 ${preStateBlock}
 
-Use Chrome MCP tools (tabs_context_mcp, read_page, get_page_text, find) to check browser state.
-Use daemon MCP tools (daemon_app_status, daemon_list_windows, daemon_list_apps) to check desktop/app state.
+Use MCP tools to check:
+- Chrome MCP: tabs_context_mcp, read_page, get_page_text, find
+- Daemon MCP: daemon_app_status, daemon_list_windows, daemon_list_apps
 
-If any condition is NOT met, fix it using MCP tools. Once all conditions are met, report:
+If any condition is NOT met, fix it using MCP tools. Then report:
 \`\`\`bash
 curl -s -X POST ${progressUrl} -H 'Content-Type: application/json' -d '{"clipId":${clip.id},"step":0,"description":"Pre-state verified"}'
 \`\`\`
 
-## Segment Recording Steps
+## Step 2: Execute Each Recording Step
 The executor has ${executor.steps.length} steps:
 ${stepsBlock}
 
-For each step N (0 to ${executor.steps.length - 1}):
-
-1. **Execute the step** (ON CAMERA — the executor starts recording, performs the action, stops recording):
+For each step N (0, 1, 2, ... ${executor.steps.length - 1}), run this curl command. Replace N with the actual step number:
 \`\`\`bash
 curl -s -X POST ${executeUrl} -H 'Content-Type: application/json' -d '{"clipId":${clip.id},"stepIndex":N}'
 \`\`\`
-This returns JSON with: \`segment\` (file path), \`frames\` (first/last frame paths), \`verify\` (verification hints).
 
-2. **Verify the result** (OFF CAMERA):
-   - Take a daemon_screenshot to see the current state
-   - If \`frames\` is returned, read the last frame image to check it looks correct
-   - If \`verify.expectVisible\` is set, check those strings are visible on screen
-   - If \`verify.expectSelector\` is set, use Chrome MCP to check the selector exists
+The API will: start recording → execute the programmatic action → stop recording → extract frames → return JSON result.
 
-3. **Report progress**:
+After each step, verify the result:
+- Check the returned JSON for errors
+- If \`frames.last\` is returned, read that image file to verify visually
+- Take a daemon_screenshot if needed
+
+Then report progress:
 \`\`\`bash
-curl -s -X POST ${progressUrl} -H 'Content-Type: application/json' -d '{"clipId":${clip.id},"step":N+1,"description":"Step N complete: <brief summary>"}'
+curl -s -X POST ${progressUrl} -H 'Content-Type: application/json' -d '{"clipId":${clip.id},"step":N+1,"description":"Step N complete"}'
 \`\`\`
 
-4. **If verification fails**: Fix the state using MCP tools (off camera), then re-execute the same step.
+If a step fails, fix the state using MCP tools, then re-run the same execute-step curl command.
 
-## Stitching
-After ALL steps pass verification, stitch the segments into the final clip:
+## Step 3: Stitch Segments
+After ALL ${executor.steps.length} steps pass:
 \`\`\`bash
 curl -s -X POST ${stitchUrl} -H 'Content-Type: application/json' -d '{"clipId":${clip.id}}'
 \`\`\`
 
-## Completion
-Signal completion:
+## Step 4: Signal Completion
 \`\`\`bash
 curl -s -X POST ${progressUrl} -H 'Content-Type: application/json' -d '{"clipId":${clip.id},"step":-1,"description":"All steps complete, video stitched"}'
 \`\`\`
 
-## Important Rules
-- **DO NOT start or stop screen recording yourself** — the execute-step API handles that
-- Steps are recorded individually — only the executor's actions are on camera
-- Your verification, fixing, and state checking is OFF CAMERA
-- If a step fails after 2 retries, report an error and stop
-
-Begin now. Start by verifying the pre-state conditions.`;
+Begin now. Start with pre-state verification.`;
 }
