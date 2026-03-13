@@ -6,6 +6,7 @@ export interface ClipDefinition {
   recordingSteps: string[];
   postState: string[];
   enabled: boolean;
+  outputPath?: string;
 }
 
 export const clips: ClipDefinition[] = [
@@ -36,6 +37,7 @@ export const clips: ClipDefinition[] = [
       "Two create-app tabs may still be open",
     ],
     enabled: true,
+    outputPath: "/opt/automateLinux/data/screen_recording.mp4",
   },
   {
     id: 2,

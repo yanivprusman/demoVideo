@@ -34,6 +34,35 @@ export default function Home() {
       .then(r => r.json())
       .then(setVideos)
       .catch(() => {});
+
+    // Check which clips have existing recordings on disk
+    const pathsToCheck: Record<string, string> = {};
+    for (const clip of clips) {
+      if (clip.outputPath) {
+        pathsToCheck[String(clip.id)] = clip.outputPath;
+      }
+    }
+    if (Object.keys(pathsToCheck).length > 0) {
+      fetch('/api/check-files', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ paths: pathsToCheck }),
+      })
+        .then(r => r.json())
+        .then((results: Record<string, { exists: boolean; path: string }>) => {
+          setClipStates(prev => {
+            const next = { ...prev };
+            for (const [clipId, info] of Object.entries(results)) {
+              const id = Number(clipId);
+              if (info.exists && (!next[id] || next[id].status === 'idle')) {
+                next[id] = { status: 'done', filePath: info.path };
+              }
+            }
+            return next;
+          });
+        })
+        .catch(() => {});
+    }
   }, []);
 
   const toggleExpand = useCallback((id: number) => {

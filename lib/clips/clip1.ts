@@ -111,9 +111,9 @@ export async function executeClip1(onStep: StepCallback): Promise<string> {
   onStep(10, 'Stopping recording...');
   const result = await sendDaemon('screenRecordStop');
 
-  const filePath = typeof result === 'object' && result?.filePath
-    ? result.filePath
-    : '/tmp/demoVideo-clip1.webm';
+  const filePath = typeof result === 'object' && result?.fileName
+    ? result.fileName
+    : '/opt/automateLinux/data/screen_recording.mp4';
 
   return filePath;
 }
