@@ -8,6 +8,19 @@ interface SegmentInfo {
   transition?: 'fade' | 'cut';
 }
 
+function hasAudioStream(filePath: string): boolean {
+  try {
+    const result = execFileSync('ffprobe', [
+      '-v', 'error', '-select_streams', 'a',
+      '-show_entries', 'stream=codec_type', '-of', 'csv=p=0',
+      filePath,
+    ], { timeout: 10000 });
+    return result.toString().trim().length > 0;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Speed up a single segment file in-place.
  */
@@ -20,21 +33,23 @@ function speedUpSegment(filePath: string, speed: number): string {
   const speedPath = path.join(dir, `${base}_speed${ext}`);
 
   const videoFilter = `setpts=PTS/${speed}`;
-  const atempoFilters: string[] = [];
-  let remaining = speed;
-  while (remaining > 2) {
-    atempoFilters.push('atempo=2.0');
-    remaining /= 2;
-  }
-  atempoFilters.push(`atempo=${remaining}`);
-  const audioFilter = atempoFilters.join(',');
+  const args = ['-y', '-i', filePath, '-filter:v', videoFilter, '-r', '30'];
 
-  execFileSync('ffmpeg', [
-    '-y', '-i', filePath,
-    '-filter:v', videoFilter,
-    '-filter:a', audioFilter,
-    speedPath,
-  ], { timeout: 600000 });
+  if (hasAudioStream(filePath)) {
+    const atempoFilters: string[] = [];
+    let remaining = speed;
+    while (remaining > 2) {
+      atempoFilters.push('atempo=2.0');
+      remaining /= 2;
+    }
+    atempoFilters.push(`atempo=${remaining}`);
+    args.push('-filter:a', atempoFilters.join(','));
+  } else {
+    args.push('-an');
+  }
+
+  args.push(speedPath);
+  execFileSync('ffmpeg', args, { timeout: 600000 });
 
   return speedPath;
 }
@@ -67,67 +82,19 @@ export function stitchSegments(segments: SegmentInfo[], outputPath: string): str
     });
   }
 
-  // Check if any segment uses crossfade
-  const hasFade = processed.some(p => p.transition === 'fade');
+  // Use concat demux — reliable across all segment types
+  const concatList = processed.map(p => `file '${p.path}'`).join('\n');
+  const listFile = path.join(path.dirname(outputPath), '_concat_list.txt');
+  writeFileSync(listFile, concatList);
 
-  if (!hasFade) {
-    // All hard cuts — simple concat demux
-    const concatList = processed.map(p => `file '${p.path}'`).join('\n');
-    const listFile = path.join(path.dirname(outputPath), '_concat_list.txt');
-    writeFileSync(listFile, concatList);
+  execFileSync('ffmpeg', [
+    '-y', '-f', 'concat', '-safe', '0',
+    '-i', listFile,
+    '-c', 'copy',
+    outputPath,
+  ], { timeout: 600000 });
 
-    execFileSync('ffmpeg', [
-      '-y', '-f', 'concat', '-safe', '0',
-      '-i', listFile,
-      '-c', 'copy',
-      outputPath,
-    ], { timeout: 600000 });
-
-    unlinkSync(listFile);
-  } else {
-    // Use filter_complex for crossfade between segments
-    // Build a progressive crossfade chain
-    const FADE_DURATION = 0.3;
-    const inputs: string[] = [];
-    for (const p of processed) {
-      inputs.push('-i', p.path);
-    }
-
-    // For simplicity with many segments, use concat filter with crossfade
-    // between each pair where transition is 'fade'
-    let filterComplex = '';
-    let lastStream = '[0:v]';
-    let lastAStream = '[0:a]';
-
-    for (let i = 1; i < processed.length; i++) {
-      const useFade = processed[i].transition === 'fade';
-      const outV = i < processed.length - 1 ? `[v${i}]` : '[outv]';
-      const outA = i < processed.length - 1 ? `[a${i}]` : '[outa]';
-
-      if (useFade) {
-        filterComplex += `${lastStream}[${i}:v]xfade=transition=fade:duration=${FADE_DURATION}:offset=0${outV};`;
-        filterComplex += `${lastAStream}[${i}:a]acrossfade=d=${FADE_DURATION}${outA};`;
-      } else {
-        filterComplex += `${lastStream}[${i}:v]concat=n=2:v=1:a=0${outV};`;
-        filterComplex += `${lastAStream}[${i}:a]concat=n=2:v=0:a=1${outA};`;
-      }
-
-      lastStream = outV;
-      lastAStream = outA;
-    }
-
-    // Remove trailing semicolon
-    filterComplex = filterComplex.replace(/;$/, '');
-
-    execFileSync('ffmpeg', [
-      '-y',
-      ...inputs,
-      '-filter_complex', filterComplex,
-      '-map', '[outv]',
-      '-map', '[outa]',
-      outputPath,
-    ], { timeout: 600000 });
-  }
+  unlinkSync(listFile);
 
   // Clean up temp sped-up files
   for (const p of processed) {

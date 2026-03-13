@@ -30,8 +30,9 @@ export async function POST(req: NextRequest) {
       return Response.json({ error: `No segments directory found for clip ${clipId}` }, { status: 404 });
     }
 
+    // Only match segment_NN.mp4, not _speed or _raw variants
     const segmentFiles = readdirSync(dir)
-      .filter(f => f.startsWith('segment_') && f.endsWith('.mp4'))
+      .filter(f => /^segment_\d+\.mp4$/.test(f))
       .sort()
       .map(f => path.join(dir, f));
 
