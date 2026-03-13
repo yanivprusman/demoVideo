@@ -1,7 +1,7 @@
 import { readdir, stat } from 'fs/promises';
 import path from 'path';
 
-const VIDEO_DIR = '/opt/automateLinux/data';
+const VIDEO_DIR = '/opt/automateLinux/data/demoVideo';
 const VIDEO_EXTENSIONS = ['.webm', '.mp4', '.mkv', '.avi'];
 
 export async function GET() {
