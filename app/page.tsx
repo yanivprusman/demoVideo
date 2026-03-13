@@ -13,6 +13,8 @@ interface ClipState {
   error?: string;
   showVideo?: boolean;
   recordingStartedAt?: number;
+  mode?: 'segment' | 'legacy';
+  segmentSteps?: number; // total steps for segment mode
 }
 
 interface VideoFile {
@@ -42,7 +44,14 @@ export default function Home() {
         if (data.type === 'step') {
           setClipStates(prev => ({
             ...prev,
-            [id]: { ...prev[id], status: 'recording', currentStep: data.step, currentStepDesc: data.description },
+            [id]: {
+              ...prev[id],
+              status: 'recording',
+              currentStep: data.step,
+              currentStepDesc: data.description,
+              ...(data.mode ? { mode: data.mode } : {}),
+              ...(data.segmentSteps ? { segmentSteps: data.segmentSteps } : {}),
+            },
           }));
         } else if (data.type === 'done') {
           setClipStates(prev => ({
@@ -307,7 +316,7 @@ function ClipCard({
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">
             <h3 className="font-semibold text-sm truncate">{clip.title}</h3>
-            <StatusBadge status={state.status} step={state.currentStep} total={clip.recordingSteps.length} />
+            <StatusBadge status={state.status} step={state.currentStep} total={clip.recordingSteps.length} mode={state.mode} segmentSteps={state.segmentSteps} />
           </div>
           <div className="flex gap-1 mt-1 flex-wrap">
             {clip.features.map((f, i) => (
@@ -407,8 +416,30 @@ function ElapsedTimer({ startedAt }: { startedAt?: number }) {
   );
 }
 
-function StatusBadge({ status, step, total }: { status: ClipStatus; step?: number; total: number }) {
+function StatusBadge({ status, step, total, mode, segmentSteps }: { status: ClipStatus; step?: number; total: number; mode?: string; segmentSteps?: number }) {
   if (status === 'recording') {
+    if (mode === 'segment' && segmentSteps) {
+      // Show per-step dots for segment mode
+      return (
+        <span className="flex items-center gap-0.5">
+          {Array.from({ length: segmentSteps }, (_, i) => {
+            const stepNum = i + 1;
+            const isDone = step !== undefined && stepNum <= step;
+            const isActive = step !== undefined && stepNum === step + 1;
+            return (
+              <span
+                key={i}
+                className={`w-1.5 h-1.5 rounded-full ${
+                  isDone ? 'bg-green-400' :
+                  isActive ? 'bg-amber-400 animate-pulse' :
+                  'bg-gray-600'
+                }`}
+              />
+            );
+          })}
+        </span>
+      );
+    }
     return <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-amber-500/20 text-amber-400 animate-pulse">{step !== undefined ? `${step}/${total}` : 'Claude...'}</span>;
   }
   if (status === 'done') {

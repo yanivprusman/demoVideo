@@ -1,9 +1,10 @@
 import { NextRequest } from 'next/server';
 import { getClip } from '@/lib/clips';
 import { broadcast } from '@/lib/broadcast';
-import { buildPrompt } from '@/lib/prompt-builder';
+import { buildPrompt, buildSegmentPrompt } from '@/lib/prompt-builder';
 import { launchClaude, isClaudeAlive } from '@/lib/claude-launcher';
 import { getClipProgress, clearClipProgress } from '@/app/api/claude-step/route';
+import { hasExecutor, getExecutor } from '@/lib/clips/executors';
 import { sendDaemon, sleep } from '@/lib/daemon';
 import { execFileSync } from 'child_process';
 
@@ -38,7 +39,8 @@ function speedUpVideo(filePath: string, speed: number): void {
 }
 
 export async function POST(req: NextRequest) {
-  const { clipId } = await req.json();
+  const body = await req.json();
+  const { clipId, mode: requestedMode } = body;
   const clip = getClip(clipId);
 
   if (!clip) {
@@ -56,6 +58,9 @@ export async function POST(req: NextRequest) {
 
   const outputPath = clip.outputPath || `/opt/automateLinux/data/demoVideo/clip${clipId}.mp4`;
 
+  // Determine recording mode: segment (new) or legacy (current)
+  const useSegmentMode = requestedMode === 'segment' || (requestedMode !== 'legacy' && hasExecutor(clipId));
+
   const encoder = new TextEncoder();
   const stream = new ReadableStream({
     async start(controller) {
@@ -68,81 +73,120 @@ export async function POST(req: NextRequest) {
         // Clear any previous progress for this clip
         clearClipProgress(clipId);
 
-        // 1. Generate prompt
-        const prompt = buildPrompt(clip, DEMO_VIDEO_PORT);
-        send({ type: 'step', step: 0, description: 'Starting screen recording...' });
+        if (useSegmentMode) {
+          // === SEGMENT MODE ===
+          // Claude orchestrates off-camera, executor records individual segments
+          const prompt = buildSegmentPrompt(clip, DEMO_VIDEO_PORT);
+          const executor = getExecutor(clipId);
+          const segmentSteps = executor?.steps.length || clip.recordingSteps.length;
+          send({ type: 'step', step: 0, description: 'Launching Claude (segment mode)...', mode: 'segment', segmentSteps });
 
-        // 2. Start screen recording
-        await sendDaemon('screenRecordStart', { fileName: outputPath });
+          // No global recording — each step records its own segment
+          const { scriptLogFile } = launchClaude(prompt, clipId);
 
-        // 3. Wait 2s warmup
-        await sleep(2000);
+          // Poll for completion (same as legacy)
+          const timeoutMs = (clip as any).timeoutMs || 300000;
+          const startTime = Date.now();
+          let lastStep = -99;
 
-        // 4. Launch Claude in tmux
-        send({ type: 'step', step: 0, description: 'Launching Claude...' });
-        const { scriptLogFile } = launchClaude(prompt, clipId);
+          while (Date.now() - startTime < timeoutMs) {
+            await sleep(2000);
 
-        // 5. Poll for completion
-        const timeoutMs = (clip as any).timeoutMs || 300000; // 5 min default
-        const startTime = Date.now();
-        let lastStep = -99;
+            const progress = getClipProgress(clipId);
+            if (progress && progress.step !== lastStep) {
+              lastStep = progress.step;
 
-        while (Date.now() - startTime < timeoutMs) {
-          await sleep(2000);
+              if (progress.step === -1) {
+                send({ type: 'step', step: clip.recordingSteps.length, description: 'Claude finished — segments stitched' });
+                break;
+              }
 
-          const progress = getClipProgress(clipId);
-          if (progress && progress.step !== lastStep) {
-            lastStep = progress.step;
+              send({ type: 'step', step: progress.step, description: progress.description });
+            }
 
-            if (progress.step === -1) {
-              // Claude signaled completion
-              send({ type: 'step', step: clip.recordingSteps.length, description: 'Claude finished — stopping recording' });
+            if (!isClaudeAlive(scriptLogFile)) {
+              if (lastStep !== -1) {
+                send({ type: 'step', step: clip.recordingSteps.length, description: 'Claude process ended' });
+              }
               break;
             }
-
-            send({ type: 'step', step: progress.step, description: progress.description });
           }
 
-          // Check if Claude process is still alive
-          if (!isClaudeAlive(scriptLogFile)) {
-            if (lastStep !== -1) {
-              // Claude died without signaling completion
-              send({ type: 'step', step: clip.recordingSteps.length, description: 'Claude process ended — stopping recording' });
+          if (Date.now() - startTime >= timeoutMs && lastStep !== -1) {
+            send({ type: 'step', step: clip.recordingSteps.length, description: 'Timeout reached' });
+          }
+
+          send({ type: 'done', filePath: outputPath });
+
+        } else {
+          // === LEGACY MODE ===
+          // Global recording + Claude does everything on camera
+          const prompt = buildPrompt(clip, DEMO_VIDEO_PORT);
+          send({ type: 'step', step: 0, description: 'Starting screen recording...' });
+
+          // Start screen recording
+          await sendDaemon('screenRecordStart', { fileName: outputPath });
+          await sleep(2000);
+
+          send({ type: 'step', step: 0, description: 'Launching Claude...' });
+          const { scriptLogFile } = launchClaude(prompt, clipId);
+
+          // Poll for completion
+          const timeoutMs = (clip as any).timeoutMs || 300000;
+          const startTime = Date.now();
+          let lastStep = -99;
+
+          while (Date.now() - startTime < timeoutMs) {
+            await sleep(2000);
+
+            const progress = getClipProgress(clipId);
+            if (progress && progress.step !== lastStep) {
+              lastStep = progress.step;
+
+              if (progress.step === -1) {
+                send({ type: 'step', step: clip.recordingSteps.length, description: 'Claude finished — stopping recording' });
+                break;
+              }
+
+              send({ type: 'step', step: progress.step, description: progress.description });
             }
-            break;
+
+            if (!isClaudeAlive(scriptLogFile)) {
+              if (lastStep !== -1) {
+                send({ type: 'step', step: clip.recordingSteps.length, description: 'Claude process ended — stopping recording' });
+              }
+              break;
+            }
           }
-        }
 
-        // Check for timeout
-        if (Date.now() - startTime >= timeoutMs && lastStep !== -1) {
-          send({ type: 'step', step: clip.recordingSteps.length, description: 'Timeout reached — stopping recording' });
-        }
-
-        // 6. Wait 2s trailing frames
-        await sleep(2000);
-
-        // 7. Stop screen recording
-        const result = await sendDaemon('screenRecordStop');
-        const filePath = typeof result === 'object' && result?.fileName
-          ? result.fileName
-          : outputPath;
-
-        // 8. Speed up the recording
-        const speed = clip.speedUp ?? DEFAULT_SPEED;
-        if (speed > 1) {
-          send({ type: 'step', step: clip.recordingSteps.length, description: `Speeding up ${speed}x with ffmpeg...` });
-          try {
-            speedUpVideo(filePath, speed);
-          } catch (err: unknown) {
-            const msg = err instanceof Error ? err.message : String(err);
-            send({ type: 'step', step: clip.recordingSteps.length, description: `Speed-up failed (raw video kept): ${msg}` });
+          if (Date.now() - startTime >= timeoutMs && lastStep !== -1) {
+            send({ type: 'step', step: clip.recordingSteps.length, description: 'Timeout reached — stopping recording' });
           }
-        }
 
-        send({ type: 'done', filePath });
+          // Wait trailing frames and stop
+          await sleep(2000);
+          const result = await sendDaemon('screenRecordStop');
+          const filePath = typeof result === 'object' && result?.fileName
+            ? result.fileName
+            : outputPath;
+
+          // Speed up the recording
+          const speed = clip.speedUp ?? DEFAULT_SPEED;
+          if (speed > 1) {
+            send({ type: 'step', step: clip.recordingSteps.length, description: `Speeding up ${speed}x with ffmpeg...` });
+            try {
+              speedUpVideo(filePath, speed);
+            } catch (err: unknown) {
+              const msg = err instanceof Error ? err.message : String(err);
+              send({ type: 'step', step: clip.recordingSteps.length, description: `Speed-up failed (raw video kept): ${msg}` });
+            }
+          }
+
+          send({ type: 'done', filePath });
+        }
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : String(err);
-        // Try to stop recording on error
+        // Try to stop recording on error (only needed in legacy mode, but safe either way)
         try { await sendDaemon('screenRecordStop'); } catch { /* ignore */ }
         send({ type: 'error', message });
       }
