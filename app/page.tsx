@@ -38,6 +38,41 @@ export default function Home() {
   const [activeVideo, setActiveVideo] = useState<string | null>(null);
   const [showVideos, setShowVideos] = useState(false);
 
+  // Subscribe to broadcast SSE for live updates from any device
+  useEffect(() => {
+    const es = new EventSource('/api/recording-status');
+    es.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        const id = data.clipId as number;
+        if (!id) return;
+
+        if (data.type === 'prestate') {
+          setClipStates(prev => ({
+            ...prev,
+            [id]: { ...prev[id], status: 'checking', preStateChecks: data.checks, currentStepDesc: 'Pre-state verified' },
+          }));
+        } else if (data.type === 'step') {
+          setClipStates(prev => ({
+            ...prev,
+            [id]: { ...prev[id], status: 'recording', currentStep: data.step, currentStepDesc: data.description },
+          }));
+        } else if (data.type === 'done') {
+          setClipStates(prev => ({
+            ...prev,
+            [id]: { status: 'done', filePath: data.filePath },
+          }));
+        } else if (data.type === 'error') {
+          setClipStates(prev => ({
+            ...prev,
+            [id]: { ...prev[id], status: 'error', error: data.message },
+          }));
+        }
+      } catch { /* ignore parse errors */ }
+    };
+    return () => es.close();
+  }, []);
+
   useEffect(() => {
     fetch('/api/videos')
       .then(r => r.json())

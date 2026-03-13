@@ -3,6 +3,7 @@ import { executeClip1 } from '@/lib/clips/clip1';
 import { getClip } from '@/lib/clips';
 import { verifyPreState } from '@/lib/clips/verifyPreState';
 import { isFixable } from '@/lib/clips/fixPreState';
+import { broadcast } from '@/lib/broadcast';
 
 type ClipExecutor = (onStep: (step: number, desc: string) => void) => Promise<string>;
 
@@ -35,6 +36,7 @@ export async function POST(req: NextRequest) {
     async start(controller) {
       const send = (data: Record<string, unknown>) => {
         controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`));
+        broadcast({ ...data, clipId });
       };
 
       try {
