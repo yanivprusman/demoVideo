@@ -3,7 +3,13 @@
 import { useState, useCallback, useEffect } from 'react';
 import { clips, type ClipDefinition } from '@/lib/clips';
 
-type ClipStatus = 'idle' | 'recording' | 'done' | 'error';
+type ClipStatus = 'idle' | 'checking' | 'recording' | 'done' | 'error';
+
+interface PreStateCheck {
+  condition: string;
+  status: 'pass' | 'fail' | 'warn';
+  message: string;
+}
 
 interface ClipState {
   status: ClipStatus;
@@ -12,6 +18,7 @@ interface ClipState {
   filePath?: string;
   error?: string;
   showVideo?: boolean;
+  preStateChecks?: PreStateCheck[];
 }
 
 interface VideoFile {
@@ -86,7 +93,7 @@ export default function Home() {
   const recordClip = useCallback(async (clipId: number) => {
     setClipStates(prev => ({
       ...prev,
-      [clipId]: { status: 'recording', currentStep: 0, currentStepDesc: 'Starting...' },
+      [clipId]: { status: 'checking', currentStepDesc: 'Verifying pre-state...' },
     }));
 
     try {
@@ -118,10 +125,21 @@ export default function Home() {
           if (!line.startsWith('data: ')) continue;
           const data = JSON.parse(line.slice(6));
 
-          if (data.type === 'step') {
+          if (data.type === 'prestate') {
             setClipStates(prev => ({
               ...prev,
               [clipId]: {
+                ...prev[clipId],
+                status: 'checking',
+                preStateChecks: data.checks,
+                currentStepDesc: 'Pre-state verified',
+              },
+            }));
+          } else if (data.type === 'step') {
+            setClipStates(prev => ({
+              ...prev,
+              [clipId]: {
+                ...prev[clipId],
                 status: 'recording',
                 currentStep: data.step,
                 currentStepDesc: data.description,
@@ -289,7 +307,7 @@ function ClipCard({
       {/* Expanded */}
       {isExpanded && (
         <div className="px-3 pb-3 space-y-2 border-t border-gray-800/50">
-          <Section title="Pre-state" items={clip.preState} color="blue" />
+          <PreStateSection items={clip.preState} checks={state.preStateChecks} />
           <Section
             title="Recording Steps"
             items={clip.recordingSteps}
@@ -300,6 +318,9 @@ function ClipCard({
           <Section title="Post-state" items={clip.postState} color="green" />
 
           {/* Status messages */}
+          {state.status === 'checking' && (
+            <p className="text-blue-400 text-xs animate-pulse pt-1">Verifying pre-state conditions...</p>
+          )}
           {state.status === 'recording' && state.currentStepDesc && (
             <p className="text-amber-400 text-xs animate-pulse pt-1">{state.currentStepDesc}</p>
           )}
@@ -335,7 +356,7 @@ function ClipCard({
           {/* Action button */}
           <button
             onClick={(e) => { e.stopPropagation(); onRecord(); }}
-            disabled={!clip.enabled || state.status === 'recording'}
+            disabled={!clip.enabled || state.status === 'recording' || state.status === 'checking'}
             className={`w-full py-2 rounded-lg font-medium text-sm transition-colors mt-1 ${buttonStyle(clip, state)}`}
           >
             {buttonLabel(state)}
@@ -347,6 +368,9 @@ function ClipCard({
 }
 
 function StatusBadge({ status, step, total }: { status: ClipStatus; step?: number; total: number }) {
+  if (status === 'checking') {
+    return <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-blue-500/20 text-blue-400 animate-pulse">Checking...</span>;
+  }
   if (status === 'recording') {
     return <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-amber-500/20 text-amber-400 animate-pulse">{step}/{total}</span>;
   }
@@ -357,6 +381,48 @@ function StatusBadge({ status, step, total }: { status: ClipStatus; step?: numbe
     return <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-red-500/20 text-red-400">Error</span>;
   }
   return null;
+}
+
+function PreStateSection({ items, checks }: { items: string[]; checks?: PreStateCheck[] }) {
+  const checkMap = new Map<string, PreStateCheck>();
+  if (checks) {
+    for (const check of checks) {
+      checkMap.set(check.condition, check);
+    }
+  }
+
+  return (
+    <div className="pt-2">
+      <h4 className="text-[10px] font-semibold uppercase tracking-wider mb-1 text-blue-400">
+        Pre-state
+      </h4>
+      <ul className="space-y-0.5">
+        {items.map((item, i) => {
+          const check = checkMap.get(item);
+          const icon = check
+            ? check.status === 'pass' ? '\u2705'
+            : check.status === 'fail' ? '\u274C'
+            : '\u26A0\uFE0F'
+            : '\u2022';
+          const textColor = check
+            ? check.status === 'pass' ? 'text-green-400'
+            : check.status === 'fail' ? 'text-red-400'
+            : 'text-yellow-400'
+            : 'text-gray-400';
+
+          return (
+            <li key={i} className={`text-xs leading-relaxed ${textColor}`}>
+              <span className="mr-1.5 inline-block w-4 text-center">{icon}</span>
+              {item}
+              {check && check.status !== 'pass' && (
+                <span className="ml-2 text-[10px] opacity-70">({check.message})</span>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  );
 }
 
 function Section({
@@ -411,6 +477,7 @@ function Section({
 
 function borderColor(status: ClipStatus) {
   switch (status) {
+    case 'checking': return 'border-blue-500/50';
     case 'recording': return 'border-amber-500/50';
     case 'done': return 'border-green-500/30';
     case 'error': return 'border-red-500/30';
@@ -419,6 +486,7 @@ function borderColor(status: ClipStatus) {
 }
 
 function numberStyle(clip: ClipDefinition, state: ClipState) {
+  if (state.status === 'checking') return 'bg-blue-500 text-white';
   if (state.status === 'recording') return 'bg-amber-500 text-black';
   if (state.status === 'done') return 'bg-green-600 text-white';
   if (state.status === 'error') return 'bg-red-600 text-white';
@@ -427,6 +495,7 @@ function numberStyle(clip: ClipDefinition, state: ClipState) {
 }
 
 function buttonStyle(clip: ClipDefinition, state: ClipState) {
+  if (state.status === 'checking') return 'bg-blue-500/20 text-blue-400 cursor-wait';
   if (state.status === 'recording') return 'bg-amber-500/20 text-amber-400 cursor-wait';
   if (!clip.enabled) return 'bg-gray-800 text-gray-600 cursor-not-allowed';
   if (state.status === 'done') return 'bg-blue-600 hover:bg-blue-500 text-white';
@@ -436,6 +505,7 @@ function buttonStyle(clip: ClipDefinition, state: ClipState) {
 
 function buttonLabel(state: ClipState) {
   switch (state.status) {
+    case 'checking': return 'Checking...';
     case 'recording': return 'Recording...';
     case 'done': return 'Re-record';
     case 'error': return 'Retry';

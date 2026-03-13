@@ -1,6 +1,7 @@
 import { NextRequest } from 'next/server';
 import { executeClip1 } from '@/lib/clips/clip1';
 import { getClip } from '@/lib/clips';
+import { verifyPreState } from '@/lib/clips/verifyPreState';
 
 type ClipExecutor = (onStep: (step: number, desc: string) => void) => Promise<string>;
 
@@ -36,6 +37,19 @@ export async function POST(req: NextRequest) {
       };
 
       try {
+        // Verify pre-state conditions before recording
+        const checks = await verifyPreState(clip.preState);
+        send({ type: 'prestate', checks });
+
+        const failures = checks.filter(c => c.status === 'fail');
+        if (failures.length > 0) {
+          const msg = failures.map(f => `${f.condition}: ${f.message}`).join('\n');
+          send({ type: 'error', message: `Pre-state check failed:\n${msg}` });
+          controller.close();
+          return;
+        }
+
+        // All checks passed (or warnings only) — proceed with recording
         const filePath = await executor((step: number, description: string) => {
           send({ type: 'step', step, description });
         });
