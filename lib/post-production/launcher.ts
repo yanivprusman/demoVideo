@@ -1,3 +1,4 @@
+import crypto from 'crypto';
 import { execFileSync, execFile } from 'child_process';
 import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync } from 'fs';
 import path from 'path';
@@ -9,8 +10,11 @@ const POST_PROD_BASE = '/opt/automateLinux/data/demoVideo/post-prod';
 const TEMPLATE_PATH = '/opt/dev/demoVideo/lib/post-production/CLAUDE.md';
 
 interface PostProdResult {
+  sessionId: string;
+  claudeSessionId: string;
   tmuxSession: string;
   workDir: string;
+  scriptLogFile: string;
 }
 
 /**
@@ -101,7 +105,11 @@ export function isPostProdAlive(clipId: number): boolean {
  */
 export function launchPostProd(clipId: number, port: number): PostProdResult {
   const workDir = generateWorkDir(clipId, port);
+  const claudeSessionId = crypto.randomUUID();
+  const sessionId = `demovideo-postprod-clip${clipId}-${Date.now().toString(36)}`;
   const tmuxSession = `demoVideo-postprod-clip${clipId}`;
+  const scriptLogFile = `/tmp/demoVideo-postprod-${sessionId}.log`;
+  const launchScriptFile = `/tmp/demoVideo-postprod-${sessionId}.sh`;
 
   const prompt = `You are editing post-production for clip ${clipId}. Read CLAUDE.md for full instructions on keyframe format, ffmpeg commands, and workflow.`;
 
@@ -111,14 +119,15 @@ export function launchPostProd(clipId: number, port: number): PostProdResult {
     .replace(/'/g, "\\'")
     .replace(/\n/g, '\\n');
 
-  const claudeCmd = `claude --dangerously-skip-permissions $'${bashEscapedPrompt}'`;
+  const claudeCmd = `claude --session-id ${claudeSessionId} --dangerously-skip-permissions $'${bashEscapedPrompt}'`;
   const bashCmd = `cd '${workDir}' && ${claudeCmd}; exec bash`;
-  const launchScriptFile = `/tmp/demoVideo-postprod-clip${clipId}.sh`;
   writeFileSync(launchScriptFile, bashCmd + '\n', { mode: 0o755 });
 
   // Get session env vars for GUI access
   const sessionEnv = getSessionEnv('yaniv');
   const envArgs = Object.entries(sessionEnv).map(([k, v]) => `${k}=${v}`);
+  envArgs.push(`CLAUDE_SESSION_ID=${claudeSessionId}`);
+  envArgs.push(`CLAUDE_LAUNCH_DIR=${workDir}`);
 
   // Kill existing tmux session if any
   try {
@@ -129,12 +138,28 @@ export function launchPostProd(clipId: number, port: number): PostProdResult {
   execFile('runuser', [
     '-u', 'yaniv', '--', 'env', ...envArgs,
     'tmux', 'new-session', '-d', '-s', tmuxSession,
-    `bash -l ${launchScriptFile}`,
+    `script -qf ${scriptLogFile} -c 'bash -l ${launchScriptFile}'`,
   ], { timeout: 10000 }, (err) => {
     if (err) console.error(`demoVideo post-prod launch failed (clip ${clipId}):`, err.message);
   });
 
-  return { tmuxSession, workDir };
+  // Register with dashboard (fire-and-forget)
+  fetch('http://localhost:3007/api/claude-sessions/register', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      sessionId,
+      claudeSessionId,
+      appName: 'demoVideo',
+      workDir,
+      scriptFile: scriptLogFile,
+      termTitle: tmuxSession,
+      useTmux: true,
+      source: 'terminal',
+    }),
+  }).catch(() => {});
+
+  return { sessionId, claudeSessionId, tmuxSession, workDir, scriptLogFile };
 }
 
 /**
