@@ -16,6 +16,7 @@ interface ClipState {
   productionTimeSecs?: number;
   mode?: 'segment' | 'legacy';
   segmentSteps?: number; // total steps for segment mode
+  videoVersion?: number; // cache-busting counter for re-stitched videos
   postProd?: {
     segments: number;
     mouseLogs: number;
@@ -286,7 +287,7 @@ export default function Home() {
       if (!r.ok) throw new Error(data.error);
       setClipStates(prev => ({
         ...prev,
-        [clipId]: { ...prev[clipId], filePath: data.filePath, postProd: { ...prev[clipId]?.postProd!, status: 'done', message: `Stitched ${data.segmentCount} segments` } },
+        [clipId]: { ...prev[clipId], filePath: data.filePath, videoVersion: (prev[clipId]?.videoVersion || 0) + 1, postProd: { ...prev[clipId]?.postProd!, status: 'done', message: `Stitched ${data.segmentCount} segments` } },
       }));
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
@@ -452,10 +453,10 @@ function ClipCard({
       {state.showVideo && state.filePath && (
         <div className="px-3 pb-2">
           <video
-            key={state.filePath}
+            key={`${state.filePath}-${state.videoVersion || 0}`}
             controls
             className="w-full rounded-lg border border-gray-700"
-            src={`/api/video?path=${encodeURIComponent(state.filePath)}`}
+            src={`/api/video?path=${encodeURIComponent(state.filePath)}&v=${state.videoVersion || 0}`}
           />
         </div>
       )}
