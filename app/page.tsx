@@ -13,6 +13,7 @@ interface ClipState {
   error?: string;
   showVideo?: boolean;
   recordingStartedAt?: number;
+  productionTimeSecs?: number;
   mode?: 'segment' | 'legacy';
   segmentSteps?: number; // total steps for segment mode
 }
@@ -54,10 +55,13 @@ export default function Home() {
             },
           }));
         } else if (data.type === 'done') {
-          setClipStates(prev => ({
-            ...prev,
-            [id]: { status: 'done', filePath: data.filePath },
-          }));
+          setClipStates(prev => {
+            const prevState = prev[id];
+            const productionTimeSecs = prevState?.recordingStartedAt
+              ? Math.round((Date.now() - prevState.recordingStartedAt) / 1000)
+              : undefined;
+            return { ...prev, [id]: { status: 'done', filePath: data.filePath, productionTimeSecs } };
+          });
         } else if (data.type === 'error') {
           setClipStates(prev => ({
             ...prev,
@@ -169,10 +173,13 @@ export default function Home() {
               },
             }));
           } else if (data.type === 'done') {
-            setClipStates(prev => ({
-              ...prev,
-              [clipId]: { status: 'done', filePath: data.filePath },
-            }));
+            setClipStates(prev => {
+              const prevState = prev[clipId];
+              const productionTimeSecs = prevState?.recordingStartedAt
+                ? Math.round((Date.now() - prevState.recordingStartedAt) / 1000)
+                : undefined;
+              return { ...prev, [clipId]: { status: 'done', filePath: data.filePath, productionTimeSecs } };
+            });
           } else if (data.type === 'error') {
             setClipStates(prev => ({
               ...prev,
@@ -355,7 +362,14 @@ function ClipCard({
           {state.status === 'done' && state.filePath && (
             <div className="pt-1 space-y-2">
               <div className="flex items-center gap-2">
-                <p className="text-green-400 text-xs flex-1 truncate">Saved: {state.filePath}</p>
+                <p className="text-green-400 text-xs flex-1 truncate">
+                  Saved: {state.filePath}
+                  {state.productionTimeSecs != null && (
+                    <span className="text-gray-500 ml-2">
+                      ({formatDuration(state.productionTimeSecs)})
+                    </span>
+                  )}
+                </p>
                 <button
                   onClick={(e) => { e.stopPropagation(); onToggleVideo(); }}
                   className={`text-xs px-2 py-1 rounded transition-colors ${
@@ -533,6 +547,12 @@ function buttonLabel(state: ClipState) {
     case 'error': return 'Retry';
     default: return 'Record';
   }
+}
+
+function formatDuration(secs: number): string {
+  const m = Math.floor(secs / 60);
+  const s = secs % 60;
+  return m > 0 ? `${m}m ${s}s` : `${s}s`;
 }
 
 function formatSize(bytes: number): string {
