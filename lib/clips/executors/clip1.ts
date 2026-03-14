@@ -1,6 +1,24 @@
 import type { ClipExecutor } from './types';
 import * as cdp from '../../cdp';
-import { sleep } from '../../daemon';
+import { sendDaemon, sleep } from '../../daemon';
+
+const SCAFFOLD_KEYS = [
+  'scaffolded', 'gitInitialized', 'repoCreated', 'portsAllocated',
+  'worktreeCreated', 'servicesInstalled', 'depsInstalled', 'built', 'servicesRunning',
+] as const;
+
+async function waitForScaffoldComplete(appName: string, timeoutMs = 180000): Promise<void> {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    try {
+      const result = await sendDaemon('createAppProgress', { app: appName });
+      const progress = typeof result === 'string' ? JSON.parse(result) : result;
+      if (SCAFFOLD_KEYS.every(key => progress[key] === true)) return;
+    } catch { /* not ready yet */ }
+    await sleep(3000);
+  }
+  throw new Error(`Scaffold timeout for ${appName} after ${timeoutMs}ms`);
+}
 
 export const clip1Executor: ClipExecutor = {
   clipId: 1,
@@ -47,35 +65,28 @@ export const clip1Executor: ClipExecutor = {
           // May still be on same tab — scaffold might show inline
         }
 
-        // Poll for scaffold completion — check for success indicator
-        const start = Date.now();
-        const TIMEOUT = 180000; // 3 min max
-        while (Date.now() - start < TIMEOUT) {
-          try {
-            const done = await cdp.evaluate<boolean>(
-              `!!document.querySelector('[data-id="scaffold-complete"]') || ` +
-              `document.body.innerText.includes('All steps completed') || ` +
-              `document.body.innerText.includes('App created successfully')`
-            );
-            if (done) break;
-          } catch { /* page might be loading */ }
-          await sleep(3000);
-        }
-
+        // Poll daemon directly for reliable completion detection
+        await waitForScaffoldComplete('taskManager');
         await sleep(2000); // Let final UI settle
+
+        // Close the create-app tab to keep tab bar clean
+        await cdp.evaluate(`window.close()`);
+        await sleep(500);
       },
       verify: {
         screenshot: true,
       },
       transition: 'fade',
-      speedUp: 30,
+      speedUp: 6,
     },
     {
       description: 'Navigate back to Apps, click New App for weatherApp',
       async execute() {
-        // Switch back to dashboard
-        await cdp.switchTab(':3007');
-        await sleep(500);
+        // Navigate in the dashboard tab (avoid tab-switch glitch)
+        await cdp.connect(':3007');
+        await cdp.evaluate(`window.location.href = 'http://localhost:3007/'`);
+        await sleep(1500);
+        await cdp.waitForElement('nav-apps', 5000);
 
         // Navigate to Apps view
         await cdp.clickElement('nav-apps');
@@ -110,42 +121,38 @@ export const clip1Executor: ClipExecutor = {
           await cdp.switchTab('create-app');
         } catch { /* may be inline */ }
 
-        const start = Date.now();
-        const TIMEOUT = 180000;
-        while (Date.now() - start < TIMEOUT) {
-          try {
-            const done = await cdp.evaluate<boolean>(
-              `!!document.querySelector('[data-id="scaffold-complete"]') || ` +
-              `document.body.innerText.includes('All steps completed') || ` +
-              `document.body.innerText.includes('App created successfully')`
-            );
-            if (done) break;
-          } catch { /* page loading */ }
-          await sleep(3000);
-        }
+        // Poll daemon directly for reliable completion detection
+        await waitForScaffoldComplete('weatherApp');
+        await sleep(2000); // Let final UI settle
 
-        await sleep(2000);
+        // Close the create-app tab to keep tab bar clean
+        await cdp.evaluate(`window.close()`);
+        await sleep(500);
       },
       verify: {
         screenshot: true,
       },
       transition: 'fade',
-      speedUp: 30,
+      speedUp: 6,
     },
     {
       description: 'Show Apps view with both apps listed',
       async execute() {
-        // Switch to dashboard
-        await cdp.switchTab(':3007');
-        await sleep(500);
+        // Navigate to dashboard root in current tab
+        await cdp.connect(':3007');
+        await cdp.evaluate(`window.location.href = 'http://localhost:3007/'`);
+        await sleep(1500);
+        await cdp.waitForElement('nav-apps', 5000);
 
         // Navigate to Apps view
         await cdp.clickElement('nav-apps');
         await sleep(1500);
 
-        // Scroll to show both apps visible
-        // The apps should already be visible in the list
-        await sleep(3000); // Hold for viewer to see
+        // Scroll to bottom to reveal new apps below the fold
+        await cdp.evaluate(`window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' })`);
+        await sleep(2000);
+
+        await sleep(2000); // Hold for viewer to see
       },
       verify: {
         screenshot: true,

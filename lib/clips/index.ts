@@ -24,6 +24,9 @@ export const clips: ClipDefinition[] = [
       "Dashboard showing Apps view (nav-apps)",
       "No apps named taskManager or weatherApp exist",
       "Right monitor (HDMI-1) is clear/unused",
+      "No file manager windows open",
+      "Only one Chrome tab (dashboard) — close MCP group tabs and extras",
+      "Bookmarks bar hidden",
     ],
     recordingSteps: [
       "Click 'New App' — fill name: taskManager, description: Task management application — click 'Create'",
@@ -35,7 +38,7 @@ export const clips: ClipDefinition[] = [
     postState: [
       "taskManager and weatherApp apps exist and are running",
       "Dashboard showing Apps view with both apps visible",
-      "Two create-app tabs may still be open",
+      "Create-app tabs closed (clean tab bar)",
     ],
     enabled: true,
     outputPath: `${DATA_DIR}/clip1-create-new-apps.mp4`,

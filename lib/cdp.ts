@@ -46,7 +46,11 @@ export async function listTabs(): Promise<TabInfo[]> {
  */
 export async function connect(urlFragment: string): Promise<CDP.Client> {
   const tabs = await listTabs();
-  const tab = tabs.find(t => t.url.includes(urlFragment));
+  // Prefer exact URL match (e.g., "http://localhost:3007/") over partial
+  // to avoid matching subpages like /create-app/... when targeting root.
+  const tab = tabs.find(t => t.url === urlFragment)
+    || tabs.find(t => t.url.endsWith(urlFragment))
+    || tabs.find(t => t.url.includes(urlFragment));
   if (!tab) {
     throw new Error(`No Chrome tab matching "${urlFragment}" found. Tabs: ${tabs.map(t => t.url).join(', ')}`);
   }
@@ -90,12 +94,18 @@ export async function connect(urlFragment: string): Promise<CDP.Client> {
  */
 async function calibrate(): Promise<void> {
   const client = getClient();
+
+  // Ensure window is maximized — "normal" state includes invisible shadows
+  // in bounds, causing coordinate offsets on GNOME Wayland.
+  const { windowId } = await client.Browser.getWindowForTarget();
+  await client.Browser.setWindowBounds({ windowId, bounds: { windowState: 'maximized' } });
+  await sleep(300);
+
+  // Read bounds from CDP (reliable device-pixel screen coords when maximized)
+  const { bounds } = await client.Browser.getWindowForTarget();
+
   const result = await client.Runtime.evaluate({
     expression: `({
-      screenX: window.screenX,
-      screenY: window.screenY,
-      outerWidth: window.outerWidth,
-      outerHeight: window.outerHeight,
       innerWidth: window.innerWidth,
       innerHeight: window.innerHeight,
       devicePixelRatio: window.devicePixelRatio,
@@ -103,9 +113,18 @@ async function calibrate(): Promise<void> {
     returnByValue: true,
   });
   const w = result.result.value;
-  // Chrome UI height in device pixels = outerHeight - (innerHeight * DPR)
-  const chromeUiHeight = Math.round(w.outerHeight - w.innerHeight * w.devicePixelRatio);
-  cachedGeometry = { ...w, chromeUiHeight };
+  // Chrome UI height in device pixels = window height - viewport height in device pixels
+  const chromeUiHeight = Math.round(bounds.height - w.innerHeight * w.devicePixelRatio);
+  cachedGeometry = {
+    screenX: bounds.left,
+    screenY: bounds.top,
+    outerWidth: bounds.width,
+    outerHeight: bounds.height,
+    innerWidth: w.innerWidth,
+    innerHeight: w.innerHeight,
+    devicePixelRatio: w.devicePixelRatio,
+    chromeUiHeight,
+  };
 }
 
 /**
