@@ -16,6 +16,13 @@ interface ClipState {
   productionTimeSecs?: number;
   mode?: 'segment' | 'legacy';
   segmentSteps?: number; // total steps for segment mode
+  postProd?: {
+    segments: number;
+    mouseLogs: number;
+    keyframes: number;
+    status?: 'generating' | 'stitching' | 'done' | 'error';
+    message?: string;
+  };
 }
 
 interface VideoFile {
@@ -221,6 +228,75 @@ export default function Home() {
     }));
   }, []);
 
+  const fetchSegmentInfo = useCallback(async (clipId: number) => {
+    try {
+      const r = await fetch(`/api/segment-info?clipId=${clipId}`);
+      const data = await r.json();
+      setClipStates(prev => ({
+        ...prev,
+        [clipId]: {
+          ...prev[clipId],
+          postProd: { ...prev[clipId]?.postProd, segments: data.segments, mouseLogs: data.mouseLogs, keyframes: data.keyframes, status: prev[clipId]?.postProd?.status, message: prev[clipId]?.postProd?.message },
+        },
+      }));
+    } catch { /* ignore */ }
+  }, []);
+
+  const generateKeyframes = useCallback(async (clipId: number) => {
+    setClipStates(prev => ({
+      ...prev,
+      [clipId]: { ...prev[clipId], postProd: { ...prev[clipId]?.postProd!, status: 'generating', message: 'Generating keyframes...' } },
+    }));
+    try {
+      const r = await fetch('/api/generate-keyframes', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ clipId }),
+      });
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.error);
+      const totalKf = (data.generated as { keyframeCount: number }[]).reduce((s, g) => s + g.keyframeCount, 0);
+      setClipStates(prev => ({
+        ...prev,
+        [clipId]: { ...prev[clipId], postProd: { ...prev[clipId]?.postProd!, status: 'done', message: `Generated ${totalKf} keyframes across ${data.generated.length} segments` } },
+      }));
+      // Refresh counts
+      await fetchSegmentInfo(clipId);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      setClipStates(prev => ({
+        ...prev,
+        [clipId]: { ...prev[clipId], postProd: { ...prev[clipId]?.postProd!, status: 'error', message } },
+      }));
+    }
+  }, [fetchSegmentInfo]);
+
+  const reStitch = useCallback(async (clipId: number) => {
+    setClipStates(prev => ({
+      ...prev,
+      [clipId]: { ...prev[clipId], postProd: { ...prev[clipId]?.postProd!, status: 'stitching', message: 'Re-stitching with zoom...' } },
+    }));
+    try {
+      const r = await fetch('/api/stitch-clip', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ clipId }),
+      });
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.error);
+      setClipStates(prev => ({
+        ...prev,
+        [clipId]: { ...prev[clipId], filePath: data.filePath, postProd: { ...prev[clipId]?.postProd!, status: 'done', message: `Stitched ${data.segmentCount} segments` } },
+      }));
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      setClipStates(prev => ({
+        ...prev,
+        [clipId]: { ...prev[clipId], postProd: { ...prev[clipId]?.postProd!, status: 'error', message } },
+      }));
+    }
+  }, []);
+
   const doneCount = Object.values(clipStates).filter(s => s.status === 'done').length;
   const recordingClip = Object.entries(clipStates).find(([, s]) => s.status === 'recording');
 
@@ -303,6 +379,9 @@ export default function Home() {
             onRecord={() => recordClip(clip.id)}
             onStop={() => stopRecording(clip.id)}
             onToggleVideo={() => toggleVideo(clip.id)}
+            onFetchSegmentInfo={() => fetchSegmentInfo(clip.id)}
+            onGenerateKeyframes={() => generateKeyframes(clip.id)}
+            onReStitch={() => reStitch(clip.id)}
           />
         ))}
       </div>
@@ -318,6 +397,9 @@ function ClipCard({
   onRecord,
   onStop,
   onToggleVideo,
+  onFetchSegmentInfo,
+  onGenerateKeyframes,
+  onReStitch,
 }: {
   clip: ClipDefinition;
   state: ClipState;
@@ -326,6 +408,9 @@ function ClipCard({
   onRecord: () => void;
   onStop: () => void;
   onToggleVideo: () => void;
+  onFetchSegmentInfo: () => void;
+  onGenerateKeyframes: () => void;
+  onReStitch: () => void;
 }) {
   return (
     <div className={`rounded-lg border ${borderColor(state.status)} bg-gray-900 overflow-hidden transition-colors`}>
@@ -413,6 +498,15 @@ function ClipCard({
             </div>
           )}
 
+          {state.status === 'done' && (
+            <PostProduction
+              postProd={state.postProd}
+              onFetchInfo={onFetchSegmentInfo}
+              onGenerateKeyframes={onGenerateKeyframes}
+              onReStitch={onReStitch}
+            />
+          )}
+
           {/* Action button */}
           {state.status === 'recording' ? (
             <button
@@ -457,6 +551,83 @@ function ElapsedTimer({ startedAt }: { startedAt?: number }) {
     <p className="text-gray-500 text-[10px]">
       Elapsed: {elapsed}
     </p>
+  );
+}
+
+function PostProduction({
+  postProd,
+  onFetchInfo,
+  onGenerateKeyframes,
+  onReStitch,
+}: {
+  postProd?: ClipState['postProd'];
+  onFetchInfo: () => void;
+  onGenerateKeyframes: () => void;
+  onReStitch: () => void;
+}) {
+  const fetched = useRef(false);
+  useEffect(() => {
+    if (!fetched.current) {
+      fetched.current = true;
+      onFetchInfo();
+    }
+  }, [onFetchInfo]);
+
+  const busy = postProd?.status === 'generating' || postProd?.status === 'stitching';
+
+  return (
+    <div className="mt-2 rounded-lg border border-gray-700/50 bg-gray-800/30 p-2.5 space-y-2">
+      <h4 className="text-[10px] font-semibold uppercase tracking-wider text-purple-400">Post-Production</h4>
+
+      {postProd && postProd.segments > 0 ? (
+        <>
+          <div className="flex gap-4 text-xs text-gray-400">
+            <span>Segments: <span className="text-gray-200">{postProd.segments}</span></span>
+            <span>Mouse logs: <span className={postProd.mouseLogs > 0 ? 'text-gray-200' : 'text-gray-600'}>{postProd.mouseLogs}</span></span>
+            <span>Keyframes: <span className={postProd.keyframes > 0 ? 'text-purple-300' : 'text-gray-600'}>{postProd.keyframes}</span></span>
+          </div>
+
+          <div className="flex gap-2">
+            <button
+              onClick={(e) => { e.stopPropagation(); onGenerateKeyframes(); }}
+              disabled={busy || postProd.mouseLogs === 0}
+              className={`text-xs px-3 py-1.5 rounded-lg font-medium transition-colors ${
+                busy || postProd.mouseLogs === 0
+                  ? 'bg-gray-800 text-gray-600 cursor-not-allowed'
+                  : 'bg-purple-600 hover:bg-purple-500 text-white'
+              }`}
+            >
+              Generate Keyframes
+            </button>
+            <button
+              onClick={(e) => { e.stopPropagation(); onReStitch(); }}
+              disabled={busy}
+              className={`text-xs px-3 py-1.5 rounded-lg font-medium transition-colors ${
+                busy
+                  ? 'bg-gray-800 text-gray-600 cursor-not-allowed'
+                  : 'bg-indigo-600 hover:bg-indigo-500 text-white'
+              }`}
+            >
+              Re-stitch
+            </button>
+          </div>
+
+          {postProd.message && (
+            <p className={`text-xs ${
+              postProd.status === 'error' ? 'text-red-400' :
+              postProd.status === 'generating' || postProd.status === 'stitching' ? 'text-amber-400 animate-pulse' :
+              'text-gray-400'
+            }`}>
+              {postProd.message}
+            </p>
+          )}
+        </>
+      ) : postProd ? (
+        <p className="text-xs text-gray-600">No segments found for this clip.</p>
+      ) : (
+        <p className="text-xs text-gray-600 animate-pulse">Loading segment info...</p>
+      )}
+    </div>
   );
 }
 
