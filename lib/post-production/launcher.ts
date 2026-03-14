@@ -154,6 +154,7 @@ export function launchPostProd(clipId: number, port: number): PostProdResult {
       workDir,
       scriptFile: scriptLogFile,
       termTitle: tmuxSession,
+      customTitle: `post production clip ${clipId}`,
       useTmux: true,
       source: 'terminal',
     }),
