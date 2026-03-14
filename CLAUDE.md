@@ -243,82 +243,17 @@ Check the dashboard source (`/opt/dev/dashboard/`) for current `data-id` attribu
 ### Frame Extraction (`lib/recording/frame-extractor.ts`)
 - `extractBookendFrames(segmentPath)` — first + last frame as JPEG for verification
 
-## Post-Production (Zoom/Crop Pipeline)
+## Post-Production (Zoom/Crop)
 
-### Overview
+Post-production is done via a conversational Claude session. Click **"Post-Production"** on a done clip in the UI to spawn a Claude Code session in tmux. The session gets a populated `CLAUDE.md` with keyframe format, ffmpeg commands, segment info, and monitor geometry.
 
-Recorded segments can be post-processed with zoom/crop keyframes before stitching. The pipeline:
+- **Template**: `lib/post-production/CLAUDE.md` (injected with clip-specific data at launch)
+- **Launcher**: `lib/post-production/launcher.ts`
+- **API**: `POST /api/launch-post-prod { clipId }` (launch), `GET /api/launch-post-prod?clipId=N` (status)
+- **tmux session**: `demoVideo-postprod-clip{N}`
+- **Working dir**: `/opt/automateLinux/data/demoVideo/post-prod/clip{N}/`
 
-```
-Mouse logs (.mouselog.jsonl) → Generate Keyframes (.keyframes.json) → Stitch with zoom → Final clip
-```
-
-The daemon automatically creates `.mouselog.jsonl` files alongside each segment during recording. These log mouse positions (from daemon `mouseMove`/`mouseClick`/`mouseDrag` commands only — NOT continuous system cursor tracking, so logs are sparse).
-
-### File Layout (per segment)
-
-```
-segments/clip1/
-  segment_00.mp4                    # Raw recorded segment
-  segment_00.mp4.mouselog.jsonl     # Mouse positions {t, x, y} (auto-created by daemon)
-  segment_00.keyframes.json         # Zoom keyframes (generated or hand-written)
-```
-
-### Keyframe Format
-
-```json
-{
-  "source": { "width": 4480, "height": 1440 },
-  "output": { "width": 1920, "height": 1080 },
-  "keyframes": [
-    { "t": 0, "cx": 2240, "cy": 720, "cropW": 4480, "cropH": 1440, "ease": 0.5, "label": "raw full view" },
-    { "t": 3, "cx": 1280, "cy": 720, "cropW": 2560, "cropH": 1440, "ease": 0.5, "label": "DP-1 only" }
-  ]
-}
-```
-
-- `cx`, `cy`: Center of crop region (screen coordinates, 4480x1440 space)
-- `cropW`, `cropH`: Crop dimensions. Should be 16:9 ratio for undistorted output.
-- Transitions between keyframes use cosine easing over `ease` seconds.
-- DP-1 (left monitor): x 0–2560, center at cx=1280. HDMI-1 (right monitor): x 2560–4480, center at cx=3520.
-- Full DP-1 view: `cx=1280, cy=720, cropW=2560, cropH=1440`
-- Full dual-monitor view: `cx=2240, cy=720, cropW=4480, cropH=1440` (non-16:9, will stretch when scaled to 1920x1080)
-
-### APIs
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/api/segment-info?clipId=N` | GET | Segment/mouselog/keyframe counts for a clip |
-| `/api/generate-keyframes` | POST | Auto-generate keyframes from mouse logs (`{clipId}`) |
-| `/api/stitch-clip` | POST | Stitch segments with zoom applied (`{clipId}`) |
-
-### Manual Keyframe Workflow
-
-Keyframes can be written by hand (or by Claude) instead of auto-generated:
-
-1. Write `.keyframes.json` files in the segment directory
-2. Call `/api/stitch-clip` or `curl -X POST http://localhost:3019/api/stitch-clip -H 'Content-Type: application/json' -d '{"clipId":1}'`
-3. The stitcher picks up keyframes automatically; segments without keyframes get no zoom
-
-To stitch without zoom: delete/remove the `.keyframes.json` files and re-stitch.
-
-### Key Constraints
-
-- **ffmpeg filter expressions**: Commas inside `if()` expressions must be wrapped in single quotes within the crop filter string (see `zoom-applier.ts`)
-- **Crop dimensions must fit source**: cropW ≤ 4480, cropH ≤ 1440
-- **Mouse logs are sparse**: Only daemon-initiated mouse commands get logged, not natural cursor movement. Auto-generated keyframes reflect automation actions, not user intent.
-- **Monitor boundaries**: The auto-generator doesn't respect monitor boundaries — crop windows can straddle both monitors, showing awkward split views. Manual keyframes are more reliable.
-- **Cache-busting**: The UI appends `&v=N` to video URLs on re-stitch so the browser loads fresh video without page refresh. This only works when re-stitching via the UI button, not via direct API calls.
-
-### Key Files
-
-| File | Purpose |
-|------|---------|
-| `lib/recording/zoom-generator.ts` | Auto-generate keyframes from mouse logs |
-| `lib/recording/zoom-applier.ts` | Apply keyframes as ffmpeg crop+scale filter |
-| `lib/recording/stitcher.ts` | Stitcher — applies zoom per-segment, then concatenates |
-| `app/api/segment-info/route.ts` | Segment info API for UI |
-| `app/api/generate-keyframes/route.ts` | Keyframe generation API |
+The zoom/crop pipeline files (`zoom-generator.ts`, `zoom-applier.ts`, `stitcher.ts`) are still used — the Claude session writes `.keyframes.json` files and calls `/api/stitch-clip` to re-render.
 
 ## Pitfalls & Lessons Learned
 
