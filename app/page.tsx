@@ -595,7 +595,8 @@ function PostProduction({
       onFetchInfo();
       onCheckPostProdStatus();
     }
-  }, [onFetchInfo, onCheckPostProdStatus]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return (
     <div className="mt-2 rounded-lg border border-gray-700/50 bg-gray-800/30 p-2.5 space-y-2">
