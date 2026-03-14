@@ -1,11 +1,13 @@
 import { execFileSync } from 'child_process';
 import { writeFileSync, unlinkSync, existsSync } from 'fs';
 import path from 'path';
+import { applyZoom } from './zoom-applier';
 
 interface SegmentInfo {
   path: string;
   speedUp?: number;
   transition?: 'fade' | 'cut';
+  keyframesPath?: string;
 }
 
 function hasAudioStream(filePath: string): boolean {
@@ -19,6 +21,23 @@ function hasAudioStream(filePath: string): boolean {
   } catch {
     return false;
   }
+}
+
+/**
+ * Apply zoom to a segment if keyframes exist, returning the zoomed file path.
+ */
+function zoomSegment(filePath: string, keyframesPath?: string): { path: string; isTemp: boolean } {
+  if (!keyframesPath || !existsSync(keyframesPath)) {
+    return { path: filePath, isTemp: false };
+  }
+
+  const dir = path.dirname(filePath);
+  const ext = path.extname(filePath);
+  const base = path.basename(filePath, ext);
+  const zoomedPath = path.join(dir, `${base}_zoomed${ext}`);
+
+  applyZoom(filePath, keyframesPath, zoomedPath);
+  return { path: zoomedPath, isTemp: true };
 }
 
 /**
@@ -61,20 +80,28 @@ function speedUpSegment(filePath: string, speed: number): string {
 export function stitchSegments(segments: SegmentInfo[], outputPath: string): string {
   if (segments.length === 0) throw new Error('No segments to stitch');
   if (segments.length === 1) {
-    // Single segment — just speed up if needed and copy
-    const result = speedUpSegment(segments[0].path, segments[0].speedUp || 1);
+    // Single segment — zoom then speed up if needed
+    const zoomed = zoomSegment(segments[0].path, segments[0].keyframesPath);
+    const result = speedUpSegment(zoomed.path, segments[0].speedUp || 1);
     if (result !== outputPath) {
       execFileSync('cp', [result, outputPath], { timeout: 30000 });
-      if (result !== segments[0].path) unlinkSync(result);
+      if (result !== zoomed.path) unlinkSync(result);
+    }
+    if (zoomed.isTemp && existsSync(zoomed.path)) {
+      try { unlinkSync(zoomed.path); } catch { /* ignore */ }
     }
     return outputPath;
   }
 
-  // Speed up segments that need it
+  // Zoom then speed up segments
   const processed: { path: string; isTemp: boolean; transition: 'fade' | 'cut' }[] = [];
+  const tempZoomed: string[] = [];
   for (const seg of segments) {
+    const zoomed = zoomSegment(seg.path, seg.keyframesPath);
+    if (zoomed.isTemp) tempZoomed.push(zoomed.path);
+
     const speed = seg.speedUp || 1;
-    const sped = speedUpSegment(seg.path, speed);
+    const sped = speedUpSegment(zoomed.path, speed);
     processed.push({
       path: sped,
       isTemp: sped !== seg.path,
@@ -96,10 +123,15 @@ export function stitchSegments(segments: SegmentInfo[], outputPath: string): str
 
   unlinkSync(listFile);
 
-  // Clean up temp sped-up files
+  // Clean up temp files (zoomed + sped-up)
   for (const p of processed) {
     if (p.isTemp && existsSync(p.path)) {
       try { unlinkSync(p.path); } catch { /* ignore */ }
+    }
+  }
+  for (const zp of tempZoomed) {
+    if (existsSync(zp)) {
+      try { unlinkSync(zp); } catch { /* ignore */ }
     }
   }
 

@@ -40,13 +40,15 @@ export async function POST(req: NextRequest) {
       return Response.json({ error: `No segment files found for clip ${clipId}` }, { status: 404 });
     }
 
-    // Build segment info with per-step metadata
+    // Build segment info with per-step metadata and keyframes
     const segments = segmentFiles.map((filePath, i) => {
       const step = executor.steps[i];
+      const keyframesPath = filePath.replace(/\.mp4$/, '.keyframes.json');
       return {
         path: filePath,
         speedUp: step?.speedUp || 1,
         transition: (step?.transition || 'fade') as 'fade' | 'cut',
+        keyframesPath: existsSync(keyframesPath) ? keyframesPath : undefined,
       };
     });
 
