@@ -132,7 +132,9 @@ export function applyZoom(
   const cropX = `min(max(0,(${cxExpr})-(${cwExpr})/2),${source.width}-(${cwExpr}))`;
   const cropY = `min(max(0,(${cyExpr})-(${chExpr})/2),${source.height}-(${chExpr}))`;
 
-  const vf = `crop=w=${cwExpr}:h=${chExpr}:x=${cropX}:y=${cropY}:exact=1,scale=${output.width}:${output.height}:flags=lanczos`;
+  // Wrap expressions in single quotes so ffmpeg's filter parser doesn't
+  // interpret commas inside if() as filter chain separators
+  const vf = `crop=w='${cwExpr}':h='${chExpr}':x='${cropX}':y='${cropY}':exact=1,scale=${output.width}:${output.height}:flags=lanczos`;
 
   execFileSync('ffmpeg', [
     '-y',
