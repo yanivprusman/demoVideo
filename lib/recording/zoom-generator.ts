@@ -191,23 +191,23 @@ export function generateKeyframes(
     outputHeight = 1080,
     bucketSize = 1,
     clusterThreshold = 300,
-    minCropW = 1920,
-    maxCropW = 2560,
+    minCropW = 960,
+    maxCropW = 1920,
   } = options;
 
   const entries = readMouseLog(mouseLogPath);
 
   if (entries.length === 0) {
-    // No mouse data — return a single static keyframe at center of DP-1
+    // No mouse data — return a single static keyframe showing full DP-1
     return {
       source: { width: sourceWidth, height: sourceHeight },
       output: { width: outputWidth, height: outputHeight },
       keyframes: [{
         t: 0,
-        cx: 1280,
-        cy: 720,
-        cropW: maxCropW,
-        cropH: Math.round(maxCropW * 9 / 16),
+        cx: 960,
+        cy: 540,
+        cropW: 1920,
+        cropH: 1080,
         ease: 0.5,
         label: 'DP-1 default (no mouse data)',
       }],
