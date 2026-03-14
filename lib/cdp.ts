@@ -177,7 +177,7 @@ export async function clickElement(dataId: string): Promise<void> {
   const pageCoords = await getElementCenter(dataId);
   const screen = toScreenCoords(pageCoords.x, pageCoords.y);
 
-  await sendDaemon('mouseMove', { x: screen.x, y: screen.y });
+  await sendDaemon('mouseMove', { x: screen.x, y: screen.y, steps: 25 });
   await sleep(100);
   await sendDaemon('mouseClick', { button: 'left', x: screen.x, y: screen.y });
   await sleep(200);
