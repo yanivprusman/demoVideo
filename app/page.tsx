@@ -98,8 +98,12 @@ export default function Home() {
             const next = { ...prev };
             for (const [clipId, info] of Object.entries(results)) {
               const id = Number(clipId);
-              if (info.exists && (!next[id] || next[id].status === 'idle')) {
-                next[id] = { status: 'done', filePath: info.path };
+              if (info.exists) {
+                if (!next[id] || next[id].status === 'idle') {
+                  next[id] = { status: 'done', filePath: info.path };
+                } else {
+                  next[id] = { ...next[id], filePath: info.path };
+                }
               }
             }
             return next;
@@ -344,8 +348,32 @@ function ClipCard({
             ))}
           </div>
         </div>
+        {state.filePath && (
+          <button
+            onClick={(e) => { e.stopPropagation(); onToggleVideo(); }}
+            className={`text-xs px-2 py-1 rounded transition-colors ${
+              state.showVideo
+                ? 'bg-purple-600 text-white'
+                : 'bg-gray-800 text-gray-400 hover:bg-gray-700 hover:text-gray-200'
+            }`}
+          >
+            {state.showVideo ? 'Hide' : 'Watch'}
+          </button>
+        )}
         <span className="text-gray-600 text-xs">{isExpanded ? '\u25B2' : '\u25BC'}</span>
       </div>
+
+      {/* Video player - outside expanded section so it's always accessible */}
+      {state.showVideo && state.filePath && (
+        <div className="px-3 pb-2">
+          <video
+            key={state.filePath}
+            controls
+            className="w-full rounded-lg border border-gray-700"
+            src={`/api/video?path=${encodeURIComponent(state.filePath)}`}
+          />
+        </div>
+      )}
 
       {/* Expanded */}
       {isExpanded && (
@@ -373,35 +401,15 @@ function ClipCard({
             <p className="text-red-400 text-xs pt-1">{state.error}</p>
           )}
           {state.status === 'done' && state.filePath && (
-            <div className="pt-1 space-y-2">
-              <div className="flex items-center gap-2">
-                <p className="text-green-400 text-xs flex-1 truncate">
-                  Saved: {state.filePath}
-                  {state.productionTimeSecs != null && (
-                    <span className="text-gray-500 ml-2">
-                      ({formatDuration(state.productionTimeSecs)})
-                    </span>
-                  )}
-                </p>
-                <button
-                  onClick={(e) => { e.stopPropagation(); onToggleVideo(); }}
-                  className={`text-xs px-2 py-1 rounded transition-colors ${
-                    state.showVideo
-                      ? 'bg-purple-600 text-white'
-                      : 'bg-gray-800 text-gray-400 hover:bg-gray-700 hover:text-gray-200'
-                  }`}
-                >
-                  {state.showVideo ? 'Hide Video' : 'Watch'}
-                </button>
-              </div>
-              {state.showVideo && (
-                <video
-                  key={state.filePath}
-                  controls
-                  className="w-full rounded-lg border border-gray-700"
-                  src={`/api/video?path=${encodeURIComponent(state.filePath)}`}
-                />
-              )}
+            <div className="pt-1">
+              <p className="text-green-400 text-xs truncate">
+                Saved: {state.filePath}
+                {state.productionTimeSecs != null && (
+                  <span className="text-gray-500 ml-2">
+                    ({formatDuration(state.productionTimeSecs)})
+                  </span>
+                )}
+              </p>
             </div>
           )}
 
