@@ -1,5 +1,5 @@
 import crypto from 'crypto';
-import { execFile } from 'child_process';
+import { execFile, execFileSync } from 'child_process';
 import { writeFileSync } from 'fs';
 import { getSessionEnv } from './session-env';
 
@@ -41,9 +41,9 @@ export function launchClaude(prompt: string, clipId: number): LaunchResult {
 
   writeFileSync(launchScriptFile, bashCmd + '\n', { mode: 0o755 });
 
-  // Kill existing tmux session for this clip if any
+  // Kill existing tmux session for this clip if any (must run as yaniv since tmux session is under yaniv's server)
   try {
-    require('child_process').execFileSync('tmux', ['kill-session', '-t', tmuxSession], { timeout: 3000 });
+    require('child_process').execFileSync('runuser', ['-u', 'yaniv', '--', 'tmux', 'kill-session', '-t', tmuxSession], { timeout: 3000 });
   } catch { /* no existing session */ }
 
   // Launch in tmux (headless — invisible during recording)
@@ -54,6 +54,22 @@ export function launchClaude(prompt: string, clipId: number): LaunchResult {
   ], { timeout: 10000 }, (err) => {
     if (err) console.error(`demoVideo claude launch failed (clip ${clipId}):`, err.message);
   });
+
+  // Register with dashboard (fire-and-forget)
+  fetch('http://localhost:3007/api/claude-sessions/register', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      sessionId,
+      claudeSessionId,
+      appName: 'demoVideo',
+      workDir: '/opt/automateLinux',
+      scriptFile: scriptLogFile,
+      termTitle: tmuxSession,
+      useTmux: true,
+      source: 'terminal',
+    }),
+  }).catch(() => {});
 
   return { sessionId, claudeSessionId, tmuxSession, scriptLogFile };
 }
