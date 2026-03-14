@@ -74,6 +74,17 @@ export function launchClaude(prompt: string, clipId: number): LaunchResult {
   return { sessionId, claudeSessionId, tmuxSession, scriptLogFile };
 }
 
+/** Kill the Claude tmux session for a clip */
+export function killClaude(clipId: number): boolean {
+  const tmuxSession = `demoVideo-clip${clipId}`;
+  try {
+    require('child_process').execFileSync('runuser', ['-u', 'yaniv', '--', 'tmux', 'kill-session', '-t', tmuxSession], { timeout: 3000 });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /** Check if the Claude process is still running in the tmux session */
 export function isClaudeAlive(scriptLogFile: string): boolean {
   try {

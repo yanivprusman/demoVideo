@@ -197,6 +197,16 @@ export default function Home() {
     }
   }, []);
 
+  const stopRecording = useCallback(async (clipId: number) => {
+    try {
+      await fetch('/api/stop-recording', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ clipId }),
+      });
+    } catch { /* ignore */ }
+  }, []);
+
   const toggleVideo = useCallback((clipId: number) => {
     setClipStates(prev => ({
       ...prev,
@@ -287,6 +297,7 @@ export default function Home() {
             isExpanded={expandedClips.has(clip.id)}
             onToggle={() => toggleExpand(clip.id)}
             onRecord={() => recordClip(clip.id)}
+            onStop={() => stopRecording(clip.id)}
             onToggleVideo={() => toggleVideo(clip.id)}
           />
         ))}
@@ -301,6 +312,7 @@ function ClipCard({
   isExpanded,
   onToggle,
   onRecord,
+  onStop,
   onToggleVideo,
 }: {
   clip: ClipDefinition;
@@ -308,6 +320,7 @@ function ClipCard({
   isExpanded: boolean;
   onToggle: () => void;
   onRecord: () => void;
+  onStop: () => void;
   onToggleVideo: () => void;
 }) {
   return (
@@ -393,13 +406,22 @@ function ClipCard({
           )}
 
           {/* Action button */}
-          <button
-            onClick={(e) => { e.stopPropagation(); onRecord(); }}
-            disabled={!clip.enabled || state.status === 'recording'}
-            className={`w-full py-2 rounded-lg font-medium text-sm transition-colors mt-1 ${buttonStyle(clip, state)}`}
-          >
-            {buttonLabel(state)}
-          </button>
+          {state.status === 'recording' ? (
+            <button
+              onClick={(e) => { e.stopPropagation(); onStop(); }}
+              className="w-full py-2 rounded-lg font-medium text-sm transition-colors mt-1 bg-red-600 hover:bg-red-500 text-white"
+            >
+              Stop Recording
+            </button>
+          ) : (
+            <button
+              onClick={(e) => { e.stopPropagation(); onRecord(); }}
+              disabled={!clip.enabled}
+              className={`w-full py-2 rounded-lg font-medium text-sm transition-colors mt-1 ${buttonStyle(clip, state)}`}
+            >
+              {buttonLabel(state)}
+            </button>
+          )}
         </div>
       )}
     </div>
